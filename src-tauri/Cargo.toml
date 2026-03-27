@@ -22,4 +22,21 @@ tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sysinfo = "0.30"
+trash = "3"
+sha2 = "0.10"
+hex = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
+walkdir = "2"
 
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = [
+  "fileapi",
+  "handleapi",
+  "winbase",
+  "windef",
+  "winerror",
+  "winnt",
+  "minwinbase",
+] }
+ntfs = "0.4"
