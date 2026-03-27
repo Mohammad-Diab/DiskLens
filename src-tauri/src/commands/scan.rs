@@ -305,24 +305,28 @@ fn scan_dir_mft(path: &str, emit: &impl Fn(u64)) -> Option<ScanResult> {
 // ─── Tauri commands ───────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn get_drives() -> Vec<DiskInfo> {
-    let disks = Disks::new_with_refreshed_list();
-    disks
-        .iter()
-        .map(|disk| {
-            let total = disk.total_space();
-            let free = disk.available_space();
-            let used = total.saturating_sub(free);
-            DiskInfo {
-                drive_letter: disk.mount_point().to_string_lossy().to_string(),
-                label: disk.name().to_string_lossy().to_string(),
-                filesystem: disk.file_system().to_string_lossy().to_string(),
-                total_bytes: total,
-                used_bytes: used,
-                free_bytes: free,
-            }
-        })
-        .collect()
+pub async fn get_drives() -> Vec<DiskInfo> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let disks = Disks::new_with_refreshed_list();
+        disks
+            .iter()
+            .map(|disk| {
+                let total = disk.total_space();
+                let free = disk.available_space();
+                let used = total.saturating_sub(free);
+                DiskInfo {
+                    drive_letter: disk.mount_point().to_string_lossy().to_string(),
+                    label: disk.name().to_string_lossy().to_string(),
+                    filesystem: disk.file_system().to_string_lossy().to_string(),
+                    total_bytes: total,
+                    used_bytes: used,
+                    free_bytes: free,
+                }
+            })
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
 }
 
 #[tauri::command]
