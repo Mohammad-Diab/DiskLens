@@ -106,7 +106,7 @@ select {
   justify-content: center;
   gap: 12px;
   flex: 1;
-  padding: 40px 24px;
+  padding: 0 24px 12vh; /* bottom padding shifts content visually upward */
 }
 
 .hero-logo {
@@ -142,8 +142,14 @@ select {
   padding: 8px 12px;
 }
 
-.hero-toolbar .scan-btn,
 .hero-toolbar .browse-btn {
   padding: 8px 16px;
   font-size: 14px;
+}
+
+.hero-toolbar .scan-btn {
+  padding: 10px 40px;
+  font-size: 15px;
+  min-width: 180px;
+  justify-content: center;
 }
