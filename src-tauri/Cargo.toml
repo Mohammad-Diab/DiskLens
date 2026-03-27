@@ -33,6 +33,8 @@ walkdir = "2"
 winapi = { version = "0.3", features = [
   "fileapi",
   "handleapi",
+  "processthreadsapi",
+  "securitybaseapi",
   "winbase",
   "windef",
   "winerror",
