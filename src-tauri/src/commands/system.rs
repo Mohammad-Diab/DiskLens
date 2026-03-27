@@ -2,24 +2,17 @@ use crate::models::FileEntry;
 
 #[tauri::command]
 pub fn pick_folder() -> Option<String> {
-    let script = r#"
-Add-Type -AssemblyName System.Windows.Forms
-$d = New-Object System.Windows.Forms.FolderBrowserDialog
-$d.Description = 'Select a folder'
-$d.RootFolder = [System.Environment+SpecialFolder]::MyComputer
-$d.ShowNewFolderButton = $false
-if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $d.SelectedPath }
-"#;
-    let output = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", script])
-        .output()
-        .ok()?;
-    let result = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .replace("\r\n", "")
-        .replace('\r', "")
-        .replace('\n', "");
-    if result.is_empty() { None } else { Some(result) }
+    // rfd uses IFileOpenDialog (modern Windows Explorer-style picker)
+    // Spawn a dedicated thread so COM STA is properly initialized
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let result = rfd::FileDialog::new().pick_folder();
+        let _ = tx.send(result);
+    });
+    rx.recv()
+        .ok()
+        .flatten()
+        .map(|p| p.to_string_lossy().to_string())
 }
 
 #[tauri::command]
