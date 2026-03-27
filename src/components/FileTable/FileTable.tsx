@@ -5,6 +5,7 @@ import {
   getSortedRowModel,
   useReactTable,
 } from '@tanstack/react-table';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../../store/useStore';
@@ -12,6 +13,8 @@ import { FileEntry, ScanResult } from '../../types';
 import { allColumns } from './columns';
 import { ContextMenu } from '../ContextMenu/ContextMenu';
 import './FileTable.css';
+
+const ROW_HEIGHT = 38;
 
 function buildBreadcrumbs(path: string): string[] {
   const parts = path.replace(/\\/g, '/').split('/').filter(Boolean);
@@ -21,17 +24,16 @@ function buildBreadcrumbs(path: string): string[] {
   });
 }
 
-interface CtxState {
-  x: number;
-  y: number;
-  entry: FileEntry;
-}
+interface CtxState { x: number; y: number; entry: FileEntry; }
 
 export function FileTable() {
   const {
     entries,
     visibleColumns,
     selectedIds,
+    activeFilter,
+    searchQuery,
+    showHidden,
     setCurrentPath,
     setBreadcrumbs,
     setEntries,
@@ -42,20 +44,26 @@ export function FileTable() {
     setSidePanelOpen,
   } = useStore();
 
-  const [sorting, setSorting] = useState<SortingState>([
-    { id: 'sizeBytes', desc: true },
-  ]);
-
+  const [sorting, setSorting] = useState<SortingState>([{ id: 'sizeBytes', desc: true }]);
   const [ctx, setCtx] = useState<CtxState | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<FileEntry | null>(null);
   const anchorIndexRef = useRef<number | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Apply client-side filters
+  const filtered = entries.filter((e) => {
+    if (!showHidden && e.isHidden) return false;
+    if (activeFilter !== 'all' && e.kind !== activeFilter) return false;
+    if (searchQuery && !e.name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+    return true;
+  });
 
   const columns = allColumns.filter(
     (col) => col.id === 'name' || visibleColumns.includes(col.id as string)
   );
 
   const table = useReactTable({
-    data: entries,
+    data: filtered,
     columns,
     state: { sorting },
     onSortingChange: setSorting,
@@ -64,6 +72,15 @@ export function FileTable() {
   });
 
   const rows = table.getRowModel().rows;
+
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 20,
+  });
+
+  const virtualItems = virtualizer.getVirtualItems();
 
   async function navigateTo(entry: FileEntry) {
     if (entry.kind !== 'folder') return;
@@ -81,52 +98,37 @@ export function FileTable() {
 
   function handleRowClick(e: React.MouseEvent, entry: FileEntry, rowIndex: number) {
     const id = entry.id;
-
     if (e.shiftKey && anchorIndexRef.current !== null) {
       const start = Math.min(anchorIndexRef.current, rowIndex);
       const end = Math.max(anchorIndexRef.current, rowIndex);
-      const rangeIds = new Set<string>();
-      for (let i = start; i <= end; i++) {
-        rangeIds.add(rows[i].original.id);
-      }
-      setSelectedIds(rangeIds);
+      const ids = new Set<string>();
+      for (let i = start; i <= end; i++) ids.add(rows[i].original.id);
+      setSelectedIds(ids);
       return;
     }
-
     if (e.ctrlKey || e.metaKey) {
       const next = new Set(selectedIds);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-        anchorIndexRef.current = rowIndex;
-      }
+      next.has(id) ? next.delete(id) : next.add(id);
+      anchorIndexRef.current = rowIndex;
       setSelectedIds(next);
       return;
     }
-
     anchorIndexRef.current = rowIndex;
     setSelectedIds(new Set([id]));
   }
 
-  function handleCheckboxChange(e: React.ChangeEvent<HTMLInputElement>, entry: FileEntry, rowIndex: number) {
+  function handleCheckbox(e: React.ChangeEvent<HTMLInputElement>, entry: FileEntry, rowIndex: number) {
     e.stopPropagation();
     const next = new Set(selectedIds);
-    if (next.has(entry.id)) {
-      next.delete(entry.id);
-    } else {
-      next.add(entry.id);
-      anchorIndexRef.current = rowIndex;
-    }
+    next.has(entry.id) ? next.delete(entry.id) : next.add(entry.id);
+    anchorIndexRef.current = rowIndex;
     setSelectedIds(next);
   }
 
   function handleHeaderCheckbox() {
-    if (selectedIds.size === rows.length) {
-      clearSelection();
-    } else {
-      setSelectedIds(new Set(rows.map((r) => r.original.id)));
-    }
+    selectedIds.size === rows.length
+      ? clearSelection()
+      : setSelectedIds(new Set(rows.map((r) => r.original.id)));
   }
 
   async function handleDeleteTrash(entry: FileEntry) {
@@ -134,13 +136,7 @@ export function FileTable() {
       await invoke('delete_to_trash', { paths: [entry.path] });
       setEntries(entries.filter((e) => e.id !== entry.id));
       clearSelection();
-    } catch (err) {
-      console.error('Trash failed:', err);
-    }
-  }
-
-  async function handleDeletePermanent(entry: FileEntry) {
-    setDeleteTarget(entry);
+    } catch (err) { console.error(err); }
   }
 
   async function confirmDeletePermanent() {
@@ -149,20 +145,13 @@ export function FileTable() {
       await invoke('delete_permanent', { paths: [deleteTarget.path] });
       setEntries(entries.filter((e) => e.id !== deleteTarget.id));
       clearSelection();
-    } catch (err) {
-      console.error('Delete failed:', err);
-    } finally {
-      setDeleteTarget(null);
-    }
-  }
-
-  function handleProperties(entry: FileEntry) {
-    setSidePanelItem(entry);
-    setSidePanelOpen(true);
+    } catch (err) { console.error(err); }
+    finally { setDeleteTarget(null); }
   }
 
   const allSelected = rows.length > 0 && selectedIds.size === rows.length;
   const someSelected = selectedIds.size > 0 && selectedIds.size < rows.length;
+  const headerGroups = table.getHeaderGroups();
 
   return (
     <div className="file-table-wrapper">
@@ -172,70 +161,86 @@ export function FileTable() {
         </div>
       )}
 
-      <table className="file-table">
-        <thead>
-          <tr>
-            <th className="col-checkbox">
-              <input
-                type="checkbox"
-                checked={allSelected}
-                ref={(el) => { if (el) el.indeterminate = someSelected; }}
-                onChange={handleHeaderCheckbox}
-              />
-            </th>
-            {table.getHeaderGroups()[0]?.headers.map((header) => (
-              <th
-                key={header.id}
-                onClick={header.column.getToggleSortingHandler()}
-                className={header.column.getCanSort() ? 'sortable' : ''}
-              >
-                {flexRender(header.column.columnDef.header, header.getContext())}
-                {header.column.getIsSorted() === 'asc' && ' ▲'}
-                {header.column.getIsSorted() === 'desc' && ' ▼'}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, rowIndex) => {
+      {/* Sticky header */}
+      <div className="file-table-head">
+        <div className="file-row file-row-header">
+          <div className="file-cell col-checkbox">
+            <input
+              type="checkbox"
+              checked={allSelected}
+              ref={(el) => { if (el) el.indeterminate = someSelected; }}
+              onChange={handleHeaderCheckbox}
+            />
+          </div>
+          {headerGroups[0]?.headers.map((header) => (
+            <div
+              key={header.id}
+              className={`file-cell${header.column.getCanSort() ? ' sortable' : ''}`}
+              onClick={header.column.getToggleSortingHandler()}
+              style={{ flex: header.id === 'name' ? '3' : '1' }}
+            >
+              {flexRender(header.column.columnDef.header, header.getContext())}
+              {header.column.getIsSorted() === 'asc' && ' ▲'}
+              {header.column.getIsSorted() === 'desc' && ' ▼'}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Virtual scroll body */}
+      <div ref={scrollRef} className="file-table-body">
+        <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+          {virtualItems.map((vRow) => {
+            const row = rows[vRow.index];
             const entry = row.original;
             const isSelected = selectedIds.has(entry.id);
             const pct = entry.pctParent;
-            let rowClass = isSelected ? 'row-selected' : '';
-            if (!isSelected) {
-              if (pct > 30) rowClass = 'row-red';
-              else if (pct >= 10) rowClass = 'row-amber';
-              else if (pct > 0) rowClass = 'row-green';
-            }
+            let rowClass = 'file-row';
+            if (isSelected) rowClass += ' row-selected';
+            else if (pct > 30) rowClass += ' row-red';
+            else if (pct >= 10) rowClass += ' row-amber';
+            else if (pct > 0) rowClass += ' row-green';
+            if (entry.isHidden) rowClass += ' row-hidden';
 
             return (
-              <tr
+              <div
                 key={row.id}
                 className={rowClass}
-                onClick={(e) => handleRowClick(e, entry, rowIndex)}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  transform: `translateY(${vRow.start}px)`,
+                  width: '100%',
+                  height: ROW_HEIGHT,
+                }}
+                onClick={(e) => handleRowClick(e, entry, vRow.index)}
                 onDoubleClick={() => navigateTo(entry)}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   setCtx({ x: e.clientX, y: e.clientY, entry });
                 }}
               >
-                <td className="col-checkbox" onClick={(e) => e.stopPropagation()}>
+                <div className="file-cell col-checkbox" onClick={(e) => e.stopPropagation()}>
                   <input
                     type="checkbox"
                     checked={isSelected}
-                    onChange={(e) => handleCheckboxChange(e, entry, rowIndex)}
+                    onChange={(e) => handleCheckbox(e, entry, vRow.index)}
                   />
-                </td>
+                </div>
                 {row.getVisibleCells().map((cell) => (
-                  <td key={cell.id}>
+                  <div
+                    key={cell.id}
+                    className="file-cell"
+                    style={{ flex: cell.column.id === 'name' ? '3' : '1' }}
+                  >
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </td>
+                  </div>
                 ))}
-              </tr>
+              </div>
             );
           })}
-        </tbody>
-      </table>
+        </div>
+      </div>
 
       {ctx && (
         <ContextMenu
@@ -244,8 +249,8 @@ export function FileTable() {
           entry={ctx.entry}
           onClose={() => setCtx(null)}
           onDeleteTrash={handleDeleteTrash}
-          onDeletePermanent={handleDeletePermanent}
-          onProperties={handleProperties}
+          onDeletePermanent={(e) => setDeleteTarget(e)}
+          onProperties={(e) => { setSidePanelItem(e); setSidePanelOpen(true); }}
         />
       )}
 
@@ -253,19 +258,11 @@ export function FileTable() {
         <div className="dialog-overlay" onClick={() => setDeleteTarget(null)}>
           <div className="dialog" onClick={(e) => e.stopPropagation()}>
             <h2>Delete Permanently</h2>
-            <p className="dialog-warning">
-              This cannot be undone. The following will be permanently deleted:
-            </p>
-            <div className="dialog-item">
-              <strong>{deleteTarget.name}</strong>
-            </div>
+            <p className="dialog-warning">This cannot be undone:</p>
+            <div className="dialog-item"><strong>{deleteTarget.name}</strong></div>
             <div className="dialog-actions">
-              <button className="btn-cancel" onClick={() => setDeleteTarget(null)}>
-                Cancel
-              </button>
-              <button className="btn-danger" onClick={confirmDeletePermanent}>
-                Delete Permanently
-              </button>
+              <button className="btn-cancel" onClick={() => setDeleteTarget(null)}>Cancel</button>
+              <button className="btn-danger" onClick={confirmDeletePermanent}>Delete Permanently</button>
             </div>
           </div>
         </div>
