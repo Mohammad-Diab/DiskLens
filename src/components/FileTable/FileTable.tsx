@@ -6,7 +6,7 @@ import {
   useReactTable,
 } from '@tanstack/react-table';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../../store/useStore';
 import { FileEntry, ScanResult } from '../../types';
@@ -27,23 +27,25 @@ function buildBreadcrumbs(path: string): string[] {
 interface CtxState { x: number; y: number; entry: FileEntry; }
 
 export function FileTable() {
-  const {
-    entries,
-    isScanning,
-    visibleColumns,
-    selectedIds,
-    activeFilter,
-    searchQuery,
-    showHidden,
-    setCurrentPath,
-    setBreadcrumbs,
-    setEntries,
-    setIsScanning,
-    setSelectedIds,
-    clearSelection,
-    setSidePanelItem,
-    setSidePanelOpen,
-  } = useStore();
+  // Individual selectors — component only re-renders when the specific
+  // value it uses changes, not on every unrelated store update.
+  const entries        = useStore((s) => s.entries);
+  const isScanning     = useStore((s) => s.isScanning);
+  const visibleColumns = useStore((s) => s.visibleColumns);
+  const selectedIds    = useStore((s) => s.selectedIds);
+  const activeFilter   = useStore((s) => s.activeFilter);
+  const searchQuery    = useStore((s) => s.searchQuery);
+  const showHidden     = useStore((s) => s.showHidden);
+
+  // Actions are stable references — fine to grab all at once
+  const setCurrentPath  = useStore((s) => s.setCurrentPath);
+  const setBreadcrumbs  = useStore((s) => s.setBreadcrumbs);
+  const setEntries      = useStore((s) => s.setEntries);
+  const setIsScanning   = useStore((s) => s.setIsScanning);
+  const setSelectedIds  = useStore((s) => s.setSelectedIds);
+  const clearSelection  = useStore((s) => s.clearSelection);
+  const setSidePanelItem = useStore((s) => s.setSidePanelItem);
+  const setSidePanelOpen = useStore((s) => s.setSidePanelOpen);
 
   const [sorting, setSorting] = useState<SortingState>([{ id: 'sizeBytes', desc: true }]);
   const [ctx, setCtx] = useState<CtxState | null>(null);
@@ -51,16 +53,22 @@ export function FileTable() {
   const anchorIndexRef = useRef<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Apply client-side filters
-  const filtered = entries.filter((e) => {
-    if (!showHidden && e.isHidden) return false;
-    if (activeFilter !== 'all' && e.kind !== activeFilter) return false;
-    if (searchQuery && !e.name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
-    return true;
-  });
+  // Memoised filter — only recalculates when data or filter params change,
+  // NOT when selectedIds or other unrelated state changes.
+  const filtered = useMemo(() =>
+    entries.filter((e) => {
+      if (!showHidden && e.isHidden) return false;
+      if (activeFilter !== 'all' && e.kind !== activeFilter) return false;
+      if (searchQuery && !e.name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+      return true;
+    }),
+    [entries, showHidden, activeFilter, searchQuery]
+  );
 
-  const columns = allColumns.filter(
-    (col) => col.id === 'name' || visibleColumns.includes(col.id as string)
+  // Memoised columns — only recalculates when column visibility changes.
+  const columns = useMemo(() =>
+    allColumns.filter((col) => col.id === 'name' || visibleColumns.includes(col.id as string)),
+    [visibleColumns]
   );
 
   const table = useReactTable({
@@ -78,7 +86,7 @@ export function FileTable() {
     count: rows.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW_HEIGHT,
-    overscan: 20,
+    overscan: 10,
   });
 
   const virtualItems = virtualizer.getVirtualItems();
