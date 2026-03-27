@@ -97,7 +97,10 @@ export function Toolbar({ showFilters = true }: ToolbarProps) {
         const suggestions = await invoke<string[]>('get_path_suggestions', { partial: inputPath });
         setPathSuggestions(suggestions);
         setDropdownMode('suggestions');
-        setShowDropdown(suggestions.length > 0);
+        const normalized = inputPath.trim().replace(/[\\\/]+$/, '').toLowerCase();
+        const exactMatch = suggestions.length === 1 &&
+          suggestions[0].toLowerCase() === normalized;
+        setShowDropdown(suggestions.length > 0 && !exactMatch);
       } catch {
         setShowDropdown(false);
       }
