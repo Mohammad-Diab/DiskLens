@@ -3,22 +3,58 @@
   align-items: center;
   flex-wrap: nowrap;
   overflow: hidden;
-  padding: 5px 12px;
+  padding: 4px 8px;
   background: var(--bg-base);
   border-bottom: 1px solid var(--border);
   font-size: 12px;
   gap: 2px;
 }
 
+/* ── Nav buttons (back / forward / up) ── */
+.breadcrumb-nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.breadcrumb-nav-btn:hover:not(:disabled) {
+  background: var(--bg-surface);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+.breadcrumb-nav-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* ── Separator line ── */
+.breadcrumb-sep-line {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+/* ── Path segments ── */
 .breadcrumb-segment {
   display: flex;
   align-items: center;
   white-space: nowrap;
 }
 
-.breadcrumb-sep {
+.breadcrumb-chevron {
   color: var(--text-secondary);
-  margin: 0 2px;
+  margin: 0 1px;
   flex-shrink: 0;
 }
 
@@ -32,13 +68,91 @@
   border-radius: 3px;
 }
 
-.breadcrumb-link:hover {
+.breadcrumb-link:hover:not(:disabled) {
   background: var(--bg-surface);
   text-decoration: underline;
 }
+
+.breadcrumb-link:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .breadcrumb-current {
   padding: 2px 4px;
   font-weight: 600;
   color: var(--text-primary);
 }
+
+/* ── Scan button (right side) ── */
+.breadcrumb-scan-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 12px;
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+
+.breadcrumb-scan-btn:hover:not(:disabled) {
+  background: var(--border);
+  color: var(--text-primary);
+}
+
+.breadcrumb-scan-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Column gear (right side) ── */
+.breadcrumb-col-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.breadcrumb-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.breadcrumb-icon-btn:hover {
+  background: var(--bg-surface);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+.breadcrumb-col-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  padding: 6px 0;
+  z-index: 600;
+  min-width: 150px;
+}
+
+.breadcrumb-col-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text-primary);
+}
+
+.breadcrumb-col-item:hover { background: var(--bg-surface); }

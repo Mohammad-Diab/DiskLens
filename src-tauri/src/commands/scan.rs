@@ -1,15 +1,33 @@
 use crate::models::{DiskInfo, FileEntry, FileKind, ScanResult};
 use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::SystemTime;
 use sysinfo::Disks;
 use tauri::Emitter;
-use walkdir::WalkDir;
 
 #[cfg(windows)]
 use std::os::windows::fs::MetadataExt;
 
-// ─── shared helpers ──────────────────────────────────────────────────────────
+// ─── Scan control state (managed by Tauri) ────────────────────────────────────
+
+pub struct ScanControl {
+    pub stop:   Arc<AtomicBool>,
+    pub paused: Arc<AtomicBool>,
+}
+
+impl Default for ScanControl {
+    fn default() -> Self {
+        Self {
+            stop:   Arc::new(AtomicBool::new(false)),
+            paused: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+// ─── Shared helpers ───────────────────────────────────────────────────────────
 
 fn hash_path(path: &str) -> String {
     let mut hasher = Sha256::new();
@@ -30,19 +48,25 @@ fn system_time_to_iso(st: std::io::Result<SystemTime>) -> String {
 
 fn cluster_round(size: u64) -> u64 {
     const CLUSTER: u64 = 4096;
-    if size == 0 {
-        0
-    } else {
-        ((size + CLUSTER - 1) / CLUSTER) * CLUSTER
+    if size == 0 { 0 } else { ((size + CLUSTER - 1) / CLUSTER) * CLUSTER }
+}
+
+/// Normalize a path: drive roots get a trailing backslash ("C:" → "C:\"),
+/// all other paths strip trailing slashes.
+fn normalize_path(s: &str) -> String {
+    let trimmed = s.trim_end_matches(['\\', '/']);
+    if trimmed.len() == 2 && trimmed.chars().nth(1) == Some(':') {
+        return format!("{}\\", trimmed);
     }
+    trimmed.to_string()
 }
 
 #[cfg(windows)]
 fn file_attributes_from_meta(meta: &std::fs::Metadata) -> (bool, bool, bool) {
     let attrs = meta.file_attributes();
-    let is_hidden = attrs & winapi::um::winnt::FILE_ATTRIBUTE_HIDDEN != 0;
-    let is_read_only = attrs & winapi::um::winnt::FILE_ATTRIBUTE_READONLY != 0;
-    let is_system = attrs & winapi::um::winnt::FILE_ATTRIBUTE_SYSTEM != 0;
+    let is_hidden    = attrs & 0x2 != 0; // FILE_ATTRIBUTE_HIDDEN
+    let is_read_only = attrs & 0x1 != 0; // FILE_ATTRIBUTE_READONLY
+    let is_system    = attrs & 0x4 != 0; // FILE_ATTRIBUTE_SYSTEM
     (is_hidden, is_read_only, is_system)
 }
 
@@ -51,26 +75,27 @@ fn file_attributes_from_meta(_meta: &std::fs::Metadata) -> (bool, bool, bool) {
     (false, false, false)
 }
 
+/// Build a single FileEntry for a path (used by get_file_info).
 pub fn build_entry_pub(path: &std::path::Path) -> Option<FileEntry> {
-    build_entry(path)
-}
-
-fn build_entry(path: &std::path::Path) -> Option<FileEntry> {
-    let meta = std::fs::metadata(path).ok()?;
+    let meta = std::fs::symlink_metadata(path).ok()?;
     let is_dir = meta.is_dir();
     let size_bytes = if is_dir { 0 } else { meta.len() };
-    let path_str = path.to_string_lossy().to_string();
+    let path_str = normalize_path(&path.to_string_lossy());
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| path_str.clone());
-
+    let parent = path
+        .parent()
+        .map(|p| normalize_path(&p.to_string_lossy()))
+        .unwrap_or_default();
     let (is_hidden, is_read_only, is_system) = file_attributes_from_meta(&meta);
 
     Some(FileEntry {
         id: hash_path(&path_str),
         name,
         path: path_str,
+        parent,
         kind: FileKind::from_path(path, is_dir),
         size_bytes,
         size_on_disk: cluster_round(size_bytes),
@@ -87,221 +112,6 @@ fn build_entry(path: &std::path::Path) -> Option<FileEntry> {
     })
 }
 
-// ─── MFT fast path (Windows NTFS + admin only) ───────────────────────────────
-
-#[cfg(windows)]
-fn is_admin() -> bool {
-    use std::mem;
-    use winapi::um::handleapi::CloseHandle;
-    use winapi::um::processthreadsapi::{GetCurrentProcess, OpenProcessToken};
-    use winapi::um::securitybaseapi::GetTokenInformation;
-    use winapi::um::winnt::{TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
-
-    unsafe {
-        let mut token = std::ptr::null_mut();
-        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
-            return false;
-        }
-        let mut elevation = TOKEN_ELEVATION { TokenIsElevated: 0 };
-        let mut size = mem::size_of::<TOKEN_ELEVATION>() as u32;
-        let ok = GetTokenInformation(
-            token,
-            TokenElevation,
-            &mut elevation as *mut _ as *mut _,
-            size,
-            &mut size,
-        );
-        CloseHandle(token);
-        ok != 0 && elevation.TokenIsElevated != 0
-    }
-}
-
-#[cfg(windows)]
-fn is_ntfs(path: &str) -> bool {
-    use std::ffi::OsStr;
-    use std::os::windows::ffi::OsStrExt;
-    use winapi::um::fileapi::GetVolumeInformationW;
-
-    let root = if path.len() >= 2 && path.chars().nth(1) == Some(':') {
-        format!("{}\\", &path[..2])
-    } else {
-        return false;
-    };
-
-    let root_wide: Vec<u16> = OsStr::new(&root)
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
-    let mut fs_name = vec![0u16; 32];
-
-    let ok = unsafe {
-        GetVolumeInformationW(
-            root_wide.as_ptr(),
-            std::ptr::null_mut(),
-            0,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            fs_name.as_mut_ptr(),
-            fs_name.len() as u32,
-        )
-    };
-
-    if ok == 0 {
-        return false;
-    }
-
-    let end = fs_name.iter().position(|&c| c == 0).unwrap_or(fs_name.len());
-    String::from_utf16_lossy(&fs_name[..end]) == "NTFS"
-}
-
-/// Convert Windows FILETIME (100-ns intervals since 1601-01-01) to ISO 8601.
-#[cfg(windows)]
-fn nt_time_to_iso(nt: &ntfs::NtfsTime) -> String {
-    const EPOCH_DIFF_SECS: u64 = 11_644_473_600;
-    let ts = nt.nt_timestamp();
-    let secs = ts / 10_000_000;
-    if secs < EPOCH_DIFF_SECS {
-        return String::new();
-    }
-    let unix_secs = secs - EPOCH_DIFF_SECS;
-    let nanos = ((ts % 10_000_000) * 100) as u32;
-    chrono::DateTime::from_timestamp(unix_secs as i64, nanos)
-        .map(|dt| dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
-        .unwrap_or_default()
-}
-
-#[cfg(windows)]
-fn scan_dir_mft(path: &str, emit: &impl Fn(u64)) -> Option<ScanResult> {
-    use ntfs::structured_values::NtfsFileAttributeFlags;
-    use ntfs::Ntfs;
-
-    let drive = if path.len() >= 2 && path.chars().nth(1) == Some(':') {
-        &path[..2]
-    } else {
-        return None;
-    };
-
-    let device_path = format!("\\\\.\\{}", drive);
-    let mut f = std::fs::OpenOptions::new()
-        .read(true)
-        .open(&device_path)
-        .ok()?;
-
-    let ntfs = Ntfs::new(&mut f).ok()?;
-
-    // Path parts after the drive letter (e.g., ["Users", "foo"])
-    let path_parts: Vec<String> = path
-        .replace('\\', "/")
-        .split('/')
-        .filter(|s| !s.is_empty())
-        .skip(1) // skip "C:" component
-        .map(|s| s.to_owned())
-        .collect();
-
-    // Navigate from root to the target directory
-    let mut current = ntfs.root_directory(&mut f).ok()?;
-
-    for part in &path_parts {
-        let found: Option<ntfs::NtfsFile<'_>> = {
-            match current.directory_index(&mut f) {
-                Err(_) => None,
-                Ok(index) => {
-                    let mut iter = index.entries();
-                    let mut result: Option<ntfs::NtfsFile<'_>> = None;
-                    while let Some(entry) = iter.next(&mut f) {
-                        if let Ok(e) = entry {
-                            if let Some(Ok(key)) = e.key() {
-                                let name = key.name().to_string_lossy().to_owned();
-                                if name.as_str().eq_ignore_ascii_case(part.as_str()) {
-                                    if let Ok(file) = e.to_file(&ntfs, &mut f) {
-                                        result = Some(file);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    result
-                    // index and iter dropped here, releasing borrow of current
-                }
-            }
-        };
-        current = found?;
-    }
-
-    // List children of the target directory using NtfsFileName key data
-    let index = current.directory_index(&mut f).ok()?;
-    let mut iter = index.entries();
-    let mut entries: Vec<FileEntry> = Vec::new();
-    let mut count: u64 = 0;
-
-    while let Some(entry) = iter.next(&mut f) {
-        let e = match entry {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-
-        let key = match e.key() {
-            Some(Ok(k)) => k,
-            _ => continue,
-        };
-
-        let name_str = key.name().to_string_lossy().to_owned();
-
-        // Skip dot entries
-        if name_str == "." || name_str == ".." {
-            continue;
-        }
-
-        let fa = key.file_attributes();
-        let is_hidden = fa.contains(NtfsFileAttributeFlags::HIDDEN);
-        let is_read_only = fa.contains(NtfsFileAttributeFlags::READ_ONLY);
-        let is_system = fa.contains(NtfsFileAttributeFlags::SYSTEM);
-        let is_dir = key.is_directory();
-
-        let size_bytes = if is_dir { 0 } else { key.data_size() };
-        let size_on_disk = if is_dir { 0 } else { key.allocated_size() };
-
-        let modified = nt_time_to_iso(&key.modification_time());
-        let accessed = nt_time_to_iso(&key.access_time());
-
-        let entry_path = format!("{}\\{}", path.trim_end_matches('\\'), name_str);
-        let kind = FileKind::from_path(std::path::Path::new(&entry_path), is_dir);
-
-        entries.push(FileEntry {
-            id: hash_path(&entry_path),
-            name: name_str,
-            path: entry_path,
-            kind,
-            size_bytes,
-            size_on_disk,
-            pct_disk: 0.0,
-            pct_parent: 0.0,
-            modified,
-            accessed,
-            is_hidden,
-            is_read_only,
-            is_system,
-            child_files: 0,
-            child_folders: 0,
-            total_items: 0,
-        });
-        count += 1;
-        if count % 25 == 0 {
-            emit(count);
-        }
-    }
-    emit(count);
-
-    let total: u64 = entries.iter().map(|e| e.size_bytes).sum();
-    Some(ScanResult {
-        path: path.to_string(),
-        entries,
-        total,
-    })
-}
-
 // ─── Tauri commands ───────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -312,15 +122,15 @@ pub async fn get_drives() -> Vec<DiskInfo> {
             .iter()
             .map(|disk| {
                 let total = disk.total_space();
-                let free = disk.available_space();
-                let used = total.saturating_sub(free);
+                let free  = disk.available_space();
+                let used  = total.saturating_sub(free);
                 DiskInfo {
                     drive_letter: disk.mount_point().to_string_lossy().to_string(),
-                    label: disk.name().to_string_lossy().to_string(),
-                    filesystem: disk.file_system().to_string_lossy().to_string(),
-                    total_bytes: total,
-                    used_bytes: used,
-                    free_bytes: free,
+                    label:        disk.name().to_string_lossy().to_string(),
+                    filesystem:   disk.file_system().to_string_lossy().to_string(),
+                    total_bytes:  total,
+                    used_bytes:   used,
+                    free_bytes:   free,
                 }
             })
             .collect()
@@ -330,72 +140,227 @@ pub async fn get_drives() -> Vec<DiskInfo> {
 }
 
 #[tauri::command]
-pub async fn scan_dir(path: String, _depth: Option<u32>, app: tauri::AppHandle) -> ScanResult {
-    tauri::async_runtime::spawn_blocking(move || {
+pub async fn scan_dir(
+    path: String,
+    app: tauri::AppHandle,
+    scan_control: tauri::State<'_, ScanControl>,
+) -> Result<ScanResult, ()> {
+    // Reset control flags at the start of every new scan
+    scan_control.stop.store(false, Ordering::SeqCst);
+    scan_control.paused.store(false, Ordering::SeqCst);
+
+    let stop   = Arc::clone(&scan_control.stop);
+    let paused = Arc::clone(&scan_control.paused);
+
+    Ok(tauri::async_runtime::spawn_blocking(move || {
         let emit = |count: u64| { let _ = app.emit("scan_progress", count); };
-        #[cfg(windows)]
-        if is_ntfs(&path) && is_admin() {
-            if let Some(result) = scan_dir_mft(&path, &emit) {
-                return result;
-            }
-        }
-        scan_dir_winapi(&path, &emit)
+        scan_recursive(&path, &emit, &stop, &paused)
     })
     .await
-    .unwrap_or_else(|_| ScanResult { path: String::new(), entries: vec![], total: 0 })
+    .unwrap_or_else(|_| ScanResult { path: String::new(), entries: vec![], total: 0 }))
 }
 
 #[tauri::command]
-pub async fn get_dir_children(path: String, app: tauri::AppHandle) -> Vec<FileEntry> {
+pub async fn stop_scan(scan_control: tauri::State<'_, ScanControl>) -> Result<(), ()> {
+    scan_control.stop.store(true, Ordering::SeqCst);
+    scan_control.paused.store(false, Ordering::SeqCst);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn pause_scan(scan_control: tauri::State<'_, ScanControl>) -> Result<(), ()> {
+    scan_control.paused.store(true, Ordering::SeqCst);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn resume_scan(scan_control: tauri::State<'_, ScanControl>) -> Result<(), ()> {
+    scan_control.paused.store(false, Ordering::SeqCst);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_dir_children(path: String) -> Vec<FileEntry> {
     tauri::async_runtime::spawn_blocking(move || {
-        let emit = |count: u64| { let _ = app.emit("scan_progress", count); };
-        #[cfg(windows)]
-        if is_ntfs(&path) && is_admin() {
-            if let Some(result) = scan_dir_mft(&path, &emit) {
-                return result.entries;
-            }
-        }
-        scan_dir_winapi(&path, &emit).entries
+        let norm = normalize_path(&path);
+        let Ok(rd) = std::fs::read_dir(&norm) else { return vec![]; };
+        rd.filter_map(|e| e.ok())
+            .filter_map(|e| build_entry_pub(&e.path()))
+            .collect()
     })
     .await
     .unwrap_or_default()
 }
 
-// ─── Windows API path (universal fallback) ───────────────────────────────────
+// ─── Recursive scan ───────────────────────────────────────────────────────────
 
-fn scan_dir_winapi(path: &str, emit: &impl Fn(u64)) -> ScanResult {
-    let root = std::path::Path::new(path);
-    if !root.exists() {
-        return ScanResult {
-            path: path.to_string(),
-            entries: vec![],
-            total: 0,
-        };
+struct RawEntry {
+    path:         String,
+    parent:       String,
+    name:         String,
+    is_dir:       bool,
+    raw_size:     u64,
+    size_on_disk: u64,
+    modified:     String,
+    accessed:     String,
+    is_hidden:    bool,
+    is_read_only: bool,
+    is_system:    bool,
+}
+
+fn scan_recursive(
+    root: &str,
+    emit: &impl Fn(u64),
+    stop: &Arc<AtomicBool>,
+    paused: &Arc<AtomicBool>,
+) -> ScanResult {
+    let root = normalize_path(root);
+
+    if !std::path::Path::new(&root).exists() {
+        return ScanResult { path: root, entries: vec![], total: 0 };
     }
 
-    let mut entries: Vec<FileEntry> = Vec::new();
+    let mut raw: Vec<RawEntry> = Vec::new();
     let mut count: u64 = 0;
+    let mut stack: Vec<std::path::PathBuf> = vec![std::path::PathBuf::from(&root)];
 
-    for e in WalkDir::new(root)
-        .min_depth(1)
-        .max_depth(1)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        if let Some(fe) = build_entry(e.path()) {
-            entries.push(fe);
-            count += 1;
-            if count % 25 == 0 {
-                emit(count);
+    'outer: while let Some(dir) = stack.pop() {
+        // Check pause: spin-wait until resumed or stopped
+        while paused.load(Ordering::Relaxed) {
+            if stop.load(Ordering::Relaxed) { break 'outer; }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        if stop.load(Ordering::Relaxed) { break; }
+
+        let Ok(read_dir) = std::fs::read_dir(&dir) else { continue; };
+        let dir_str = normalize_path(&dir.to_string_lossy());
+
+        for entry in read_dir.filter_map(|e| e.ok()) {
+            // Check stop periodically
+            if count % 500 == 0 && stop.load(Ordering::Relaxed) {
+                break 'outer;
             }
+
+            let path = entry.path();
+            let meta = match std::fs::symlink_metadata(&path) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+
+            if meta.file_type().is_symlink() { continue; }
+
+            #[cfg(windows)]
+            if meta.file_attributes() & 0x400 != 0 { continue; }
+
+            let is_dir       = meta.is_dir();
+            let raw_size     = if is_dir { 0 } else { meta.len() };
+            let size_on_disk = cluster_round(raw_size);
+            let (is_hidden, is_read_only, is_system) = file_attributes_from_meta(&meta);
+            let path_str = normalize_path(&path.to_string_lossy());
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+
+            raw.push(RawEntry {
+                path: path_str.clone(),
+                parent: dir_str.clone(),
+                name,
+                is_dir,
+                raw_size,
+                size_on_disk,
+                modified: system_time_to_iso(meta.modified()),
+                accessed: system_time_to_iso(meta.accessed()),
+                is_hidden,
+                is_read_only,
+                is_system,
+            });
+
+            count += 1;
+            if count % 1000 == 0 { emit(count); }
+
+            if is_dir { stack.push(path); }
         }
     }
     emit(count);
 
-    let total: u64 = entries.iter().map(|e| e.size_bytes).sum();
-    ScanResult {
-        path: path.to_string(),
-        entries,
-        total,
+    // ── Compute cumulative folder sizes ───────────────────────────────────
+
+    let mut folder_size: HashMap<String, u64> = HashMap::new();
+    folder_size.insert(root.clone(), 0);
+    for e in &raw {
+        if e.is_dir { folder_size.entry(e.path.clone()).or_insert(0); }
     }
+    for e in &raw {
+        if !e.is_dir {
+            *folder_size.entry(e.parent.clone()).or_insert(0) += e.raw_size;
+        }
+    }
+
+    let mut dir_paths: Vec<String> = folder_size.keys().cloned().collect();
+    dir_paths.sort_unstable_by(|a, b| b.len().cmp(&a.len()));
+    for dir_path in &dir_paths {
+        let size = *folder_size.get(dir_path).unwrap_or(&0);
+        if size == 0 { continue; }
+        let parent_path = std::path::Path::new(dir_path)
+            .parent()
+            .map(|p| normalize_path(&p.to_string_lossy()))
+            .unwrap_or_default();
+        if !parent_path.is_empty() {
+            if let Some(p) = folder_size.get_mut(&parent_path) {
+                *p += size;
+            }
+        }
+    }
+
+    let total_size = *folder_size.get(&root).unwrap_or(&0);
+
+    // ── Direct child counts ───────────────────────────────────────────────
+
+    let mut child_files_map:   HashMap<String, u64> = HashMap::new();
+    let mut child_folders_map: HashMap<String, u64> = HashMap::new();
+    for e in &raw {
+        if e.is_dir { *child_folders_map.entry(e.parent.clone()).or_insert(0) += 1; }
+        else        { *child_files_map.entry(e.parent.clone()).or_insert(0)   += 1; }
+    }
+
+    // ── Build FileEntry vec ───────────────────────────────────────────────
+
+    let entries: Vec<FileEntry> = raw
+        .into_iter()
+        .map(|e| {
+            let size = if e.is_dir {
+                *folder_size.get(&e.path).unwrap_or(&0)
+            } else {
+                e.raw_size
+            };
+            let parent_total = (*folder_size.get(&e.parent).unwrap_or(&1)).max(1);
+            let pct_parent = (size as f64 / parent_total as f64) * 100.0;
+            let pct_disk   = if total_size > 0 { (size as f64 / total_size as f64) * 100.0 } else { 0.0 };
+            let cf  = *child_files_map.get(&e.path).unwrap_or(&0);
+            let cfo = *child_folders_map.get(&e.path).unwrap_or(&0);
+
+            FileEntry {
+                id:   hash_path(&e.path),
+                name: e.name,
+                path: e.path.clone(),
+                parent: e.parent,
+                kind: FileKind::from_path(std::path::Path::new(&e.path), e.is_dir),
+                size_bytes:   size,
+                size_on_disk: if e.is_dir { cluster_round(size) } else { e.size_on_disk },
+                pct_disk,
+                pct_parent,
+                modified:     e.modified,
+                accessed:     e.accessed,
+                is_hidden:    e.is_hidden,
+                is_read_only: e.is_read_only,
+                is_system:    e.is_system,
+                child_files:   cf,
+                child_folders: cfo,
+                total_items:   cf + cfo,
+            }
+        })
+        .collect();
+
+    ScanResult { path: root, entries, total: total_size }
 }

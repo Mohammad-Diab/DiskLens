@@ -11,9 +11,8 @@ import { useStore } from './store/useStore';
 
 function App() {
   const sidePanelOpen = useStore((s) => s.sidePanelOpen);
-  const entries = useStore((s) => s.entries);
-  const isScanning = useStore((s) => s.isScanning);
-  const scanProgress = useStore((s) => s.scanProgress);
+  const entries         = useStore((s) => s.entries);
+  const isScanning      = useStore((s) => s.isScanning);
   const setScanProgress = useStore((s) => s.setScanProgress);
 
   useKeyboard();
@@ -59,16 +58,6 @@ function App() {
   return (
     <div className="app">
       <Toolbar />
-      {isScanning && (
-        <div className="scan-progress-bar">
-          <div className="scan-progress-track">
-            <div className="scan-progress-fill" />
-          </div>
-          <span className="scan-progress-label">
-            Analyzing{scanProgress > 0 ? ` — ${scanProgress.toLocaleString()} items found` : '…'}
-          </span>
-        </div>
-      )}
       <DiskBar />
       <Breadcrumb />
       <div className="main-content">

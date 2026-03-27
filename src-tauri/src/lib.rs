@@ -11,10 +11,14 @@ use commands::{file_ops, scan, system};
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .manage(scan::ScanControl::default())
         .invoke_handler(tauri::generate_handler![
             scan::get_drives,
             scan::scan_dir,
             scan::get_dir_children,
+            scan::stop_scan,
+            scan::pause_scan,
+            scan::resume_scan,
             file_ops::delete_to_trash,
             file_ops::delete_permanent,
             file_ops::rename_file,
