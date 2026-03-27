@@ -50,6 +50,10 @@ fn file_attributes_from_meta(_meta: &std::fs::Metadata) -> (bool, bool, bool) {
     (false, false, false)
 }
 
+pub fn build_entry_pub(path: &std::path::Path) -> Option<FileEntry> {
+    build_entry(path)
+}
+
 fn build_entry(path: &std::path::Path) -> Option<FileEntry> {
     let meta = std::fs::metadata(path).ok()?;
     let is_dir = meta.is_dir();

@@ -36,3 +36,9 @@ select {
   height: 100vh;
   overflow: hidden;
 }
+
+.main-content {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}

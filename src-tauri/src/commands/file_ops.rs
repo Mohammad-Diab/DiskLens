@@ -1,16 +1,32 @@
-// Stub — full implementation in Task 15
+use std::path::Path;
 
 #[tauri::command]
-pub fn delete_to_trash(_paths: Vec<String>) -> Result<(), String> {
-    Err("not implemented".to_string())
+pub fn delete_to_trash(paths: Vec<String>) -> Result<(), String> {
+    for path in &paths {
+        trash::delete(path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
-pub fn delete_permanent(_paths: Vec<String>) -> Result<(), String> {
-    Err("not implemented".to_string())
+pub fn delete_permanent(paths: Vec<String>) -> Result<(), String> {
+    for path in &paths {
+        let p = Path::new(path);
+        if p.is_dir() {
+            std::fs::remove_dir_all(p).map_err(|e| e.to_string())?;
+        } else {
+            std::fs::remove_file(p).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
-pub fn rename_file(_path: String, _new_name: String) -> Result<(), String> {
-    Err("not implemented".to_string())
+pub fn rename_file(path: String, new_name: String) -> Result<(), String> {
+    let old = Path::new(&path);
+    let new_path = old
+        .parent()
+        .ok_or("no parent directory")?
+        .join(&new_name);
+    std::fs::rename(old, new_path).map_err(|e| e.to_string())
 }
