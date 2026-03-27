@@ -240,11 +240,23 @@ export function Toolbar({ showFilters = true }: ToolbarProps) {
           Browse
         </button>
 
-        <button className="scan-btn" onClick={handleScan} disabled={isScanning || !inputPath.trim()}>
-          <Scan size={14} />
-          {isScanning ? 'Scanning...' : 'Scan'}
-        </button>
+        {showFilters && (
+          <button className="scan-btn" onClick={handleScan} disabled={isScanning || !inputPath.trim()}>
+            <Scan size={14} />
+            {isScanning ? 'Scanning...' : 'Scan'}
+          </button>
+        )}
       </div>
+
+      {/* In hero mode the Scan button gets its own centered row */}
+      {!showFilters && (
+        <div className="toolbar-row toolbar-scan-hero">
+          <button className="scan-btn" onClick={handleScan} disabled={isScanning || !inputPath.trim()}>
+            <Scan size={14} />
+            {isScanning ? 'Scanning...' : 'Scan'}
+          </button>
+        </div>
+      )}
 
       {/* Row 2: search + filters + toggles (hidden in hero mode) */}
       {showFilters && (
