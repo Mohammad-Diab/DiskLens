@@ -10,6 +10,20 @@
   --row-green: #dcfce7;
 }
 
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-base: #1a1a1a;
+    --bg-surface: #252525;
+    --bg-row-hover: #2e2e2e;
+    --text-primary: #e5e5e5;
+    --text-secondary: #999999;
+    --border: #3a3a3a;
+    --row-red: #3d1a1a;
+    --row-amber: #2e2500;
+    --row-green: #0d2e16;
+  }
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
