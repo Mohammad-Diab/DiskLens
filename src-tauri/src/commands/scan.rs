@@ -3,6 +3,7 @@ use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
 use std::time::SystemTime;
 use sysinfo::Disks;
+use tauri::Emitter;
 use walkdir::WalkDir;
 
 #[cfg(windows)]
@@ -171,7 +172,7 @@ fn nt_time_to_iso(nt: &ntfs::NtfsTime) -> String {
 }
 
 #[cfg(windows)]
-fn scan_dir_mft(path: &str) -> Option<ScanResult> {
+fn scan_dir_mft(path: &str, emit: &impl Fn(u64)) -> Option<ScanResult> {
     use ntfs::structured_values::NtfsFileAttributeFlags;
     use ntfs::Ntfs;
 
@@ -233,6 +234,7 @@ fn scan_dir_mft(path: &str) -> Option<ScanResult> {
     let index = current.directory_index(&mut f).ok()?;
     let mut iter = index.entries();
     let mut entries: Vec<FileEntry> = Vec::new();
+    let mut count: u64 = 0;
 
     while let Some(entry) = iter.next(&mut f) {
         let e = match entry {
@@ -285,7 +287,12 @@ fn scan_dir_mft(path: &str) -> Option<ScanResult> {
             child_folders: 0,
             total_items: 0,
         });
+        count += 1;
+        if count % 25 == 0 {
+            emit(count);
+        }
     }
+    emit(count);
 
     let total: u64 = entries.iter().map(|e| e.size_bytes).sum();
     Some(ScanResult {
@@ -319,24 +326,36 @@ pub fn get_drives() -> Vec<DiskInfo> {
 }
 
 #[tauri::command]
-pub fn scan_dir(path: String, _depth: Option<u32>) -> ScanResult {
+pub fn scan_dir(path: String, _depth: Option<u32>, app: tauri::AppHandle) -> ScanResult {
+    let emit = |count: u64| {
+        let _ = app.emit("scan_progress", count);
+    };
     #[cfg(windows)]
     if is_ntfs(&path) && is_admin() {
-        if let Some(result) = scan_dir_mft(&path) {
+        if let Some(result) = scan_dir_mft(&path, &emit) {
             return result;
         }
     }
-    scan_dir_winapi(&path)
+    scan_dir_winapi(&path, &emit)
 }
 
 #[tauri::command]
-pub fn get_dir_children(path: String) -> Vec<FileEntry> {
-    scan_dir(path, None).entries
+pub fn get_dir_children(path: String, app: tauri::AppHandle) -> Vec<FileEntry> {
+    let emit = |count: u64| {
+        let _ = app.emit("scan_progress", count);
+    };
+    #[cfg(windows)]
+    if is_ntfs(&path) && is_admin() {
+        if let Some(result) = scan_dir_mft(&path, &emit) {
+            return result.entries;
+        }
+    }
+    scan_dir_winapi(&path, &emit).entries
 }
 
 // ─── Windows API path (universal fallback) ───────────────────────────────────
 
-fn scan_dir_winapi(path: &str) -> ScanResult {
+fn scan_dir_winapi(path: &str, emit: &impl Fn(u64)) -> ScanResult {
     let root = std::path::Path::new(path);
     if !root.exists() {
         return ScanResult {
@@ -346,16 +365,26 @@ fn scan_dir_winapi(path: &str) -> ScanResult {
         };
     }
 
-    let entries: Vec<FileEntry> = WalkDir::new(root)
+    let mut entries: Vec<FileEntry> = Vec::new();
+    let mut count: u64 = 0;
+
+    for e in WalkDir::new(root)
         .min_depth(1)
         .max_depth(1)
         .into_iter()
         .filter_map(|e| e.ok())
-        .filter_map(|e| build_entry(e.path()))
-        .collect();
+    {
+        if let Some(fe) = build_entry(e.path()) {
+            entries.push(fe);
+            count += 1;
+            if count % 25 == 0 {
+                emit(count);
+            }
+        }
+    }
+    emit(count);
 
     let total: u64 = entries.iter().map(|e| e.size_bytes).sum();
-
     ScanResult {
         path: path.to_string(),
         entries,

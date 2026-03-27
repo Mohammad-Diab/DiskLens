@@ -1,3 +1,5 @@
+import { useEffect } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import './App.css';
 import { Breadcrumb } from './components/Breadcrumb/Breadcrumb';
 import { DiskBar } from './components/DiskBar/DiskBar';
@@ -11,8 +13,24 @@ function App() {
   const sidePanelOpen = useStore((s) => s.sidePanelOpen);
   const entries = useStore((s) => s.entries);
   const isScanning = useStore((s) => s.isScanning);
+  const scanProgress = useStore((s) => s.scanProgress);
+  const setScanProgress = useStore((s) => s.setScanProgress);
 
   useKeyboard();
+
+  // Listen to scan_progress events from Rust
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<number>('scan_progress', (event) => {
+      setScanProgress(event.payload);
+    }).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, [setScanProgress]);
+
+  // Reset progress counter when a new scan begins
+  useEffect(() => {
+    if (isScanning) setScanProgress(0);
+  }, [isScanning]);
 
   const hasScanned = entries.length > 0 || isScanning;
 
@@ -41,6 +59,16 @@ function App() {
   return (
     <div className="app">
       <Toolbar />
+      {isScanning && (
+        <div className="scan-progress-bar">
+          <div className="scan-progress-track">
+            <div className="scan-progress-fill" />
+          </div>
+          <span className="scan-progress-label">
+            Analyzing{scanProgress > 0 ? ` — ${scanProgress.toLocaleString()} items found` : '…'}
+          </span>
+        </div>
+      )}
       <DiskBar />
       <Breadcrumb />
       <div className="main-content">

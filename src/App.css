@@ -57,6 +57,42 @@ select {
   overflow: hidden;
 }
 
+/* ── Scan progress bar ── */
+.scan-progress-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 12px 8px;
+  background: var(--bg-base);
+  border-bottom: 1px solid var(--border);
+}
+
+.scan-progress-track {
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.scan-progress-fill {
+  height: 100%;
+  width: 40%;
+  background: #3b82f6;
+  border-radius: 2px;
+  animation: scan-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes scan-slide {
+  0%   { transform: translateX(-100%); }
+  50%  { transform: translateX(150%); }
+  100% { transform: translateX(350%); }
+}
+
+.scan-progress-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
 /* ── Hero (no scan yet) ── */
 .app-hero {
   align-items: center;

@@ -30,6 +30,7 @@ interface AppState {
   activeFilter: FileKind | 'all';
   searchQuery: string;
   showHidden: boolean;
+  scanProgress: number;
 
   // Actions
   setCurrentPath: (path: string) => void;
@@ -47,6 +48,7 @@ interface AppState {
   setActiveFilter: (f: FileKind | 'all') => void;
   setSearchQuery: (q: string) => void;
   setShowHidden: (v: boolean) => void;
+  setScanProgress: (n: number) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -63,6 +65,7 @@ export const useStore = create<AppState>((set) => ({
   activeFilter: 'all',
   searchQuery: '',
   showHidden: false,
+  scanProgress: 0,
 
   setCurrentPath: (path) => set({ currentPath: path }),
   setScanRoot: (path) => set({ scanRoot: path }),
@@ -88,4 +91,5 @@ export const useStore = create<AppState>((set) => ({
   setActiveFilter: (f) => set({ activeFilter: f }),
   setSearchQuery: (q) => set({ searchQuery: q }),
   setShowHidden: (v) => set({ showHidden: v }),
+  setScanProgress: (n) => set({ scanProgress: n }),
 }));
