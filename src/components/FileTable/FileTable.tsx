@@ -6,66 +6,96 @@ import {
   useReactTable,
 } from '@tanstack/react-table';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../../store/useStore';
-import { FileEntry, ScanResult } from '../../types';
+import { DiskInfo, FileEntry, ScanResult } from '../../types';
 import { allColumns } from './columns';
 import { ContextMenu } from '../ContextMenu/ContextMenu';
 import './FileTable.css';
 
 const ROW_HEIGHT = 38;
 
-function buildBreadcrumbs(path: string): string[] {
-  const parts = path.replace(/\\/g, '/').split('/').filter(Boolean);
-  return parts.map((_, i) => {
-    const raw = parts.slice(0, i + 1).join('\\');
-    return i === 0 && raw.includes(':') ? raw + '\\' : raw;
-  });
-}
-
 interface CtxState { x: number; y: number; entry: FileEntry; }
 
 export function FileTable() {
-  // Individual selectors — component only re-renders when the specific
-  // value it uses changes, not on every unrelated store update.
   const entries        = useStore((s) => s.entries);
   const isScanning     = useStore((s) => s.isScanning);
+  const scanProgress   = useStore((s) => s.scanProgress);
+  const isPaused       = useStore((s) => s.isPaused);
   const visibleColumns = useStore((s) => s.visibleColumns);
   const selectedIds    = useStore((s) => s.selectedIds);
   const activeFilter   = useStore((s) => s.activeFilter);
   const searchQuery    = useStore((s) => s.searchQuery);
   const showHidden     = useStore((s) => s.showHidden);
+  const currentPath    = useStore((s) => s.currentPath);
+  const knownTotals    = useStore((s) => s.knownTotals);
 
-  // Actions are stable references — fine to grab all at once
-  const setCurrentPath  = useStore((s) => s.setCurrentPath);
-  const setBreadcrumbs  = useStore((s) => s.setBreadcrumbs);
-  const setEntries      = useStore((s) => s.setEntries);
-  const setIsScanning   = useStore((s) => s.setIsScanning);
-  const setSelectedIds  = useStore((s) => s.setSelectedIds);
-  const clearSelection  = useStore((s) => s.clearSelection);
+  const navigate         = useStore((s) => s.navigate);
+  const setScanRoot      = useStore((s) => s.setScanRoot);
+  const setEntries       = useStore((s) => s.setEntries);
+  const setIsScanning    = useStore((s) => s.setIsScanning);
+  const setIsPaused      = useStore((s) => s.setIsPaused);
+  const setDiskInfo      = useStore((s) => s.setDiskInfo);
+  const setKnownTotal    = useStore((s) => s.setKnownTotal);
+  const setSelectedIds   = useStore((s) => s.setSelectedIds);
+  const clearSelection   = useStore((s) => s.clearSelection);
+  const resetScan        = useStore((s) => s.resetScan);
   const setSidePanelItem = useStore((s) => s.setSidePanelItem);
   const setSidePanelOpen = useStore((s) => s.setSidePanelOpen);
 
-  const [sorting, setSorting] = useState<SortingState>([{ id: 'sizeBytes', desc: true }]);
-  const [ctx, setCtx] = useState<CtxState | null>(null);
+  const [sorting, setSorting]           = useState<SortingState>([{ id: 'sizeBytes', desc: true }]);
+  const [ctx, setCtx]                   = useState<CtxState | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<FileEntry | null>(null);
+  // Shallow listing for paths not yet in the scanned tree
+  const [shallowEntries, setShallowEntries] = useState<FileEntry[]>([]);
   const anchorIndexRef = useRef<number | null>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollRef      = useRef<HTMLDivElement>(null);
 
-  // Memoised filter — only recalculates when data or filter params change,
-  // NOT when selectedIds or other unrelated state changes.
+  // Direct children from the deep scan tree
+  const treeEntries = useMemo(() =>
+    entries.filter((e) => e.parent.toLowerCase() === currentPath.toLowerCase()),
+    [entries, currentPath]
+  );
+
+  // When navigating to a path not in the tree, fetch a shallow listing
+  useEffect(() => {
+    if (!currentPath || isScanning || treeEntries.length > 0) {
+      setShallowEntries([]);
+      return;
+    }
+    let cancelled = false;
+    invoke<FileEntry[]>('get_dir_children', { path: currentPath })
+      .then((children) => {
+        if (cancelled) return;
+        // Enhance folder sizes with values from previously completed scans
+        const enhanced = children.map((child) => {
+          const known = knownTotals[child.path.toLowerCase()];
+          if (child.kind === 'folder' && known !== undefined) {
+            return { ...child, sizeBytes: known, sizeOnDisk: known };
+          }
+          return child;
+        });
+        setShallowEntries(enhanced);
+      })
+      .catch(() => { if (!cancelled) setShallowEntries([]); });
+    return () => { cancelled = true; };
+  }, [currentPath, treeEntries.length, isScanning]);
+
+  // The base list: prefer deep-scan tree; fall back to shallow listing
+  const baseEntries = treeEntries.length > 0 ? treeEntries : shallowEntries;
+
+  // Apply search / kind / hidden filters
   const filtered = useMemo(() =>
-    entries.filter((e) => {
+    baseEntries.filter((e) => {
       if (!showHidden && e.isHidden) return false;
       if (activeFilter !== 'all' && e.kind !== activeFilter) return false;
       if (searchQuery && !e.name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
       return true;
     }),
-    [entries, showHidden, activeFilter, searchQuery]
+    [baseEntries, showHidden, activeFilter, searchQuery]
   );
 
-  // Memoised columns — only recalculates when column visibility changes.
   const columns = useMemo(() =>
     allColumns.filter((col) => col.id === 'name' || visibleColumns.includes(col.id as string)),
     [visibleColumns]
@@ -80,28 +110,42 @@ export function FileTable() {
     getSortedRowModel: getSortedRowModel(),
   });
 
-  const rows = table.getRowModel().rows;
-
-  const virtualizer = useVirtualizer({
+  const rows         = table.getRowModel().rows;
+  const virtualizer  = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW_HEIGHT,
     overscan: 10,
   });
-
   const virtualItems = virtualizer.getVirtualItems();
 
   async function navigateTo(entry: FileEntry) {
     if (entry.kind !== 'folder' || isScanning) return;
-    setIsScanning(true);
-    try {
-      const result = await invoke<ScanResult>('scan_dir', { path: entry.path });
-      setEntries(result.entries);
-      setCurrentPath(result.path);
-      setBreadcrumbs(buildBreadcrumbs(result.path));
-      clearSelection();
-    } finally {
-      setIsScanning(false);
+
+    const inTree = entries.some(
+      (e) => e.parent.toLowerCase() === entry.path.toLowerCase()
+    );
+
+    if (inTree) {
+      navigate(entry.path);
+    } else {
+      setIsScanning(true);
+      try {
+        const [result, drives] = await Promise.all([
+          invoke<ScanResult>('scan_dir', { path: entry.path }),
+          invoke<DiskInfo[]>('get_drives'),
+        ]);
+        setEntries(result.entries);
+        setScanRoot(result.path);
+        setKnownTotal(result.path, result.total);
+        const drive = (drives as DiskInfo[]).find((d) =>
+          result.path.toLowerCase().startsWith(d.driveLetter.toLowerCase())
+        );
+        setDiskInfo(drive ?? null);
+        navigate(result.path);
+      } finally {
+        setIsScanning(false);
+      }
     }
   }
 
@@ -109,8 +153,8 @@ export function FileTable() {
     const id = entry.id;
     if (e.shiftKey && anchorIndexRef.current !== null) {
       const start = Math.min(anchorIndexRef.current, rowIndex);
-      const end = Math.max(anchorIndexRef.current, rowIndex);
-      const ids = new Set<string>();
+      const end   = Math.max(anchorIndexRef.current, rowIndex);
+      const ids   = new Set<string>();
       for (let i = start; i <= end; i++) ids.add(rows[i].original.id);
       setSelectedIds(ids);
       return;
@@ -158,7 +202,7 @@ export function FileTable() {
     finally { setDeleteTarget(null); }
   }
 
-  const allSelected = rows.length > 0 && selectedIds.size === rows.length;
+  const allSelected  = rows.length > 0 && selectedIds.size === rows.length;
   const someSelected = selectedIds.size > 0 && selectedIds.size < rows.length;
   const headerGroups = table.getHeaderGroups();
 
@@ -200,15 +244,15 @@ export function FileTable() {
       <div ref={scrollRef} className="file-table-body">
         <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
           {virtualItems.map((vRow) => {
-            const row = rows[vRow.index];
-            const entry = row.original;
+            const row    = rows[vRow.index];
+            const entry  = row.original;
             const isSelected = selectedIds.has(entry.id);
             const pct = entry.pctParent;
             let rowClass = 'file-row';
-            if (isSelected) rowClass += ' row-selected';
-            else if (pct > 30) rowClass += ' row-red';
+            if (isSelected)    rowClass += ' row-selected';
+            else if (pct > 30)  rowClass += ' row-red';
             else if (pct >= 10) rowClass += ' row-amber';
-            else if (pct > 0) rowClass += ' row-green';
+            else if (pct > 0)   rowClass += ' row-green';
             if (entry.isHidden) rowClass += ' row-hidden';
 
             return (
@@ -250,6 +294,45 @@ export function FileTable() {
           })}
         </div>
       </div>
+
+      {/* Scanning overlay */}
+      {isScanning && (
+        <div className="table-scan-overlay">
+          <div className={`table-scan-spinner${isPaused ? ' spinner-paused' : ''}`} />
+          <span className="table-scan-label">
+            {isPaused
+              ? 'Paused'
+              : `Scanning${scanProgress > 0 ? ` — ${scanProgress.toLocaleString()} items found` : '…'}`}
+          </span>
+          <div className="table-scan-actions">
+            <button
+              className="scan-ctrl-btn"
+              onClick={async () => {
+                if (isPaused) {
+                  await invoke('resume_scan');
+                  setIsPaused(false);
+                } else {
+                  await invoke('pause_scan');
+                  setIsPaused(true);
+                }
+              }}
+            >
+              {isPaused ? '▶ Resume' : '⏸ Pause'}
+            </button>
+            <button
+              className="scan-ctrl-btn scan-ctrl-stop"
+              onClick={async () => {
+                await invoke('stop_scan');
+                setIsPaused(false);
+                setIsScanning(false);
+                resetScan();
+              }}
+            >
+              ⏹ Stop
+            </button>
+          </div>
+        </div>
+      )}
 
       {ctx && (
         <ContextMenu

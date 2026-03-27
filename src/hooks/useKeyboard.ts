@@ -1,22 +1,15 @@
 import { RefObject, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../store/useStore';
-import { ScanResult } from '../types';
-
-function buildBreadcrumbs(path: string): string[] {
-  const parts = path.replace(/\\/g, '/').split('/').filter(Boolean);
-  return parts.map((_, i) => {
-    const raw = parts.slice(0, i + 1).join('\\');
-    return i === 0 && raw.includes(':') ? raw + '\\' : raw;
-  });
-}
+import { DiskInfo, ScanResult } from '../types';
 
 function parentOf(path: string): string | null {
-  const normalized = path.replace(/\\/g, '/').replace(/\/$/, '');
-  const idx = normalized.lastIndexOf('/');
-  if (idx <= 0) return null;
-  const parent = normalized.slice(0, idx).replace(/\//g, '\\');
-  return parent.includes(':') && !parent.endsWith('\\') ? parent + '\\' : parent;
+  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
+  const parts = normalized.split('/').filter(Boolean);
+  if (parts.length <= 1) return null;
+  const parentParts = parts.slice(0, -1);
+  const raw = parentParts.join('\\');
+  return raw.includes(':') && !raw.includes('\\') ? raw + '\\' : raw;
 }
 
 export function useKeyboard(searchRef?: RefObject<HTMLInputElement | null>) {
@@ -24,7 +17,6 @@ export function useKeyboard(searchRef?: RefObject<HTMLInputElement | null>) {
 
   useEffect(() => {
     async function handler(e: KeyboardEvent) {
-      // Skip when typing in an input/textarea
       const target = e.target as HTMLElement;
       if (
         target.tagName === 'INPUT' ||
@@ -53,23 +45,38 @@ export function useKeyboard(searchRef?: RefObject<HTMLInputElement | null>) {
         return;
       }
 
-      // Shift+Delete → permanently delete (not implemented as dialog here; handled in FileTable)
-      // The FileTable dialog is the canonical path for permanent delete.
-
       // Backspace → navigate to parent
       if (e.key === 'Backspace') {
         e.preventDefault();
         const parent = parentOf(currentPath);
         if (!parent) return;
-        store.setIsScanning(true);
-        try {
-          const result = await invoke<ScanResult>('scan_dir', { path: parent });
-          store.setEntries(result.entries);
-          store.setCurrentPath(result.path);
-          store.setBreadcrumbs(buildBreadcrumbs(result.path));
-          store.clearSelection();
-        } finally {
-          store.setIsScanning(false);
+
+        // Check if parent is already in the scanned tree
+        const inTree = entries.some(
+          (en) => en.parent.toLowerCase() === parent.toLowerCase()
+        ) || entries.some(
+          (en) => en.path.toLowerCase() === parent.toLowerCase()
+        );
+
+        if (inTree) {
+          store.navigate(parent);
+        } else {
+          store.setIsScanning(true);
+          try {
+            const [result, drives] = await Promise.all([
+              invoke<ScanResult>('scan_dir', { path: parent }),
+              invoke<DiskInfo[]>('get_drives'),
+            ]);
+            store.setEntries(result.entries);
+            store.setScanRoot(result.path);
+            const drive = (drives as DiskInfo[]).find((d) =>
+              result.path.toLowerCase().startsWith(d.driveLetter.toLowerCase())
+            );
+            store.setDiskInfo(drive ?? null);
+            store.navigate(result.path);
+          } finally {
+            store.setIsScanning(false);
+          }
         }
         return;
       }
@@ -81,15 +88,32 @@ export function useKeyboard(searchRef?: RefObject<HTMLInputElement | null>) {
         const [id] = selectedIds;
         const entry = entries.find((en) => en.id === id);
         if (!entry || entry.kind !== 'folder') return;
-        store.setIsScanning(true);
-        try {
-          const result = await invoke<ScanResult>('scan_dir', { path: entry.path });
-          store.setEntries(result.entries);
-          store.setCurrentPath(result.path);
-          store.setBreadcrumbs(buildBreadcrumbs(result.path));
+
+        const inTree = entries.some(
+          (en) => en.parent.toLowerCase() === entry.path.toLowerCase()
+        );
+
+        if (inTree) {
+          store.navigate(entry.path);
           store.clearSelection();
-        } finally {
-          store.setIsScanning(false);
+        } else {
+          store.setIsScanning(true);
+          try {
+            const [result, drives] = await Promise.all([
+              invoke<ScanResult>('scan_dir', { path: entry.path }),
+              invoke<DiskInfo[]>('get_drives'),
+            ]);
+            store.setEntries(result.entries);
+            store.setScanRoot(result.path);
+            const drive = (drives as DiskInfo[]).find((d) =>
+              result.path.toLowerCase().startsWith(d.driveLetter.toLowerCase())
+            );
+            store.setDiskInfo(drive ?? null);
+            store.navigate(result.path);
+            store.clearSelection();
+          } finally {
+            store.setIsScanning(false);
+          }
         }
         return;
       }
@@ -97,7 +121,11 @@ export function useKeyboard(searchRef?: RefObject<HTMLInputElement | null>) {
       // Ctrl+A → select all visible
       if (e.key === 'a' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        store.setSelectedIds(new Set(entries.map((en) => en.id)));
+        store.setSelectedIds(new Set(
+          entries
+            .filter((en) => en.parent.toLowerCase() === currentPath.toLowerCase())
+            .map((en) => en.id)
+        ));
         return;
       }
 
@@ -144,6 +172,7 @@ export function useKeyboard(searchRef?: RefObject<HTMLInputElement | null>) {
         try {
           const result = await invoke<ScanResult>('scan_dir', { path: currentPath });
           store.setEntries(result.entries);
+          store.setScanRoot(currentPath);
           store.clearSelection();
         } finally {
           store.setIsScanning(false);
@@ -155,6 +184,20 @@ export function useKeyboard(searchRef?: RefObject<HTMLInputElement | null>) {
       if (e.key === 'f' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         searchRef?.current?.focus();
+        return;
+      }
+
+      // Alt+Left → back
+      if (e.key === 'ArrowLeft' && e.altKey) {
+        e.preventDefault();
+        store.goBack();
+        return;
+      }
+
+      // Alt+Right → forward
+      if (e.key === 'ArrowRight' && e.altKey) {
+        e.preventDefault();
+        store.goForward();
         return;
       }
     }

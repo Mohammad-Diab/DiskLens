@@ -12,6 +12,7 @@ export interface FileEntry {
   id: string;
   name: string;
   path: string;
+  parent: string;
   kind: FileKind;
   sizeBytes: number;
   sizeOnDisk: number;

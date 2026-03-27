@@ -43,6 +43,7 @@ pub struct FileEntry {
     pub id: String,
     pub name: String,
     pub path: String,
+    pub parent: String,
     pub kind: FileKind,
     pub size_bytes: u64,
     pub size_on_disk: u64,
