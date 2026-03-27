@@ -1,0 +1,68 @@
+.file-table-wrapper {
+  flex: 1;
+  overflow: auto;
+  background: var(--bg-surface);
+}
+
+.file-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.file-table th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-base);
+  border-bottom: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+  font-weight: 600;
+  white-space: nowrap;
+  user-select: none;
+  z-index: 1;
+}
+
+.file-table th.sortable {
+  cursor: pointer;
+}
+
+.file-table th.sortable:hover {
+  background: var(--bg-surface);
+}
+
+.file-table td {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 300px;
+}
+
+.file-table tr:hover td {
+  background: var(--bg-row-hover);
+}
+
+.file-table tr.row-red td { background: var(--row-red); }
+.file-table tr.row-amber td { background: var(--row-amber); }
+.file-table tr.row-green td { background: var(--row-green); }
+
+.cell-name {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.cell-name-text {
+  font-weight: 500;
+}
+
+.sub-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.kind-icon {
+  display: none;
+}
