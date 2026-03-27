@@ -18,6 +18,10 @@
   gap: 6px;
 }
 
+.toolbar-scan-hero {
+  justify-content: center;
+}
+
 .path-wrap {
   position: relative;
   flex: 1;
