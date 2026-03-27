@@ -21,6 +21,8 @@ pub fn run() {
             system::open_in_explorer,
             system::copy_to_clipboard,
             system::get_file_info,
+            system::pick_folder,
+            system::get_path_suggestions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -18,18 +18,13 @@
   gap: 6px;
 }
 
-.drive-select {
-  padding: 5px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg-surface);
-  color: var(--text-primary);
-  font-size: 13px;
-  min-width: 100px;
+.path-wrap {
+  position: relative;
+  flex: 1;
 }
 
 .path-input {
-  flex: 1;
+  width: 100%;
   padding: 5px 10px;
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -43,6 +38,66 @@
   outline: none;
   border-color: #3b82f6;
 }
+
+/* ── Path autocomplete dropdown ── */
+.path-dropdown {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+  z-index: 600;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.path-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: monospace;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-primary);
+}
+
+.path-suggestion:hover { background: var(--bg-row-hover); }
+
+.suggestion-drive {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.suggestion-label {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: inherit;
+}
+
+/* ── Browse button ── */
+.browse-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.browse-btn:hover:not(:disabled) { background: var(--border); }
+.browse-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .scan-btn {
   display: flex;
