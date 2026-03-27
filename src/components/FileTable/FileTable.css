@@ -77,10 +77,24 @@
   overflow: hidden;
 }
 
+.cell-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.kind-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
 .cell-name-text {
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sub-label {
