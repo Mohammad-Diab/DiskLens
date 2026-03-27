@@ -326,31 +326,35 @@ pub fn get_drives() -> Vec<DiskInfo> {
 }
 
 #[tauri::command]
-pub fn scan_dir(path: String, _depth: Option<u32>, app: tauri::AppHandle) -> ScanResult {
-    let emit = |count: u64| {
-        let _ = app.emit("scan_progress", count);
-    };
-    #[cfg(windows)]
-    if is_ntfs(&path) && is_admin() {
-        if let Some(result) = scan_dir_mft(&path, &emit) {
-            return result;
+pub async fn scan_dir(path: String, _depth: Option<u32>, app: tauri::AppHandle) -> ScanResult {
+    tauri::async_runtime::spawn_blocking(move || {
+        let emit = |count: u64| { let _ = app.emit("scan_progress", count); };
+        #[cfg(windows)]
+        if is_ntfs(&path) && is_admin() {
+            if let Some(result) = scan_dir_mft(&path, &emit) {
+                return result;
+            }
         }
-    }
-    scan_dir_winapi(&path, &emit)
+        scan_dir_winapi(&path, &emit)
+    })
+    .await
+    .unwrap_or_else(|_| ScanResult { path: String::new(), entries: vec![], total: 0 })
 }
 
 #[tauri::command]
-pub fn get_dir_children(path: String, app: tauri::AppHandle) -> Vec<FileEntry> {
-    let emit = |count: u64| {
-        let _ = app.emit("scan_progress", count);
-    };
-    #[cfg(windows)]
-    if is_ntfs(&path) && is_admin() {
-        if let Some(result) = scan_dir_mft(&path, &emit) {
-            return result.entries;
+pub async fn get_dir_children(path: String, app: tauri::AppHandle) -> Vec<FileEntry> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let emit = |count: u64| { let _ = app.emit("scan_progress", count); };
+        #[cfg(windows)]
+        if is_ntfs(&path) && is_admin() {
+            if let Some(result) = scan_dir_mft(&path, &emit) {
+                return result.entries;
+            }
         }
-    }
-    scan_dir_winapi(&path, &emit).entries
+        scan_dir_winapi(&path, &emit).entries
+    })
+    .await
+    .unwrap_or_default()
 }
 
 // ─── Windows API path (universal fallback) ───────────────────────────────────

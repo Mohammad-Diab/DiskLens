@@ -29,6 +29,7 @@ interface CtxState { x: number; y: number; entry: FileEntry; }
 export function FileTable() {
   const {
     entries,
+    isScanning,
     visibleColumns,
     selectedIds,
     activeFilter,
@@ -83,7 +84,7 @@ export function FileTable() {
   const virtualItems = virtualizer.getVirtualItems();
 
   async function navigateTo(entry: FileEntry) {
-    if (entry.kind !== 'folder') return;
+    if (entry.kind !== 'folder' || isScanning) return;
     setIsScanning(true);
     try {
       const result = await invoke<ScanResult>('scan_dir', { path: entry.path });
