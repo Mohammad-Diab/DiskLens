@@ -224,6 +224,15 @@ export function Toolbar({ showFilters = true }: ToolbarProps) {
       {/* ── Normal mode: search + filters + new-scan ── */}
       {showFilters && (
         <div className="toolbar-row toolbar-row-2">
+          {/* New scan — far left */}
+          <button
+            className="icon-btn"
+            onClick={resetScan}
+            title="Start a new scan"
+          >
+            <FolderSearch size={14} />
+          </button>
+
           {/* Type filter chips — hide chips with 0 items in current folder */}
           <div className="filter-chips">
             {KIND_FILTERS.filter((f) =>
@@ -263,14 +272,6 @@ export function Toolbar({ showFilters = true }: ToolbarProps) {
             )}
           </div>
 
-          {/* New scan */}
-          <button
-            className="icon-btn"
-            onClick={resetScan}
-            title="Start a new scan"
-          >
-            <FolderSearch size={14} />
-          </button>
         </div>
       )}
 
