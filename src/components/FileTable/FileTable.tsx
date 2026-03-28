@@ -450,6 +450,7 @@ export function FileTable() {
           entry={ctx.entry}
           entries={ctx.entries}
           onClose={() => setCtx(null)}
+          onOpen={(e) => navigateTo(e)}
           onDeleteTrash={handleDeleteTrash}
           onDeletePermanent={(entriesToDelete) => {
             setDeleteTargets(entriesToDelete);

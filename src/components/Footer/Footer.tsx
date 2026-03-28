@@ -24,6 +24,9 @@ export function Footer() {
   const itemCount     = folderEntries.length;
   const folderSize    = folderEntries.reduce((sum, e) => sum + e.sizeBytes, 0);
   const selectedCount = selectedIds.size;
+  const selectedSize  = folderEntries
+    .filter((e) => selectedIds.has(e.id))
+    .reduce((sum, e) => sum + e.sizeBytes, 0);
 
   const showDisk = diskInfo && isDriveRoot(currentPath);
   const usedPct  = showDisk
@@ -66,7 +69,9 @@ export function Footer() {
         {folderSize > 0 && <span>{formatBytes(folderSize)}</span>}
         {selectedCount > 0 && <span className="footer-dot">·</span>}
         {selectedCount > 0 && (
-          <span className="footer-selected">{selectedCount} selected</span>
+          <span className="footer-selected">
+            {selectedCount} selected ({formatBytes(selectedSize)})
+          </span>
         )}
       </div>
     </div>

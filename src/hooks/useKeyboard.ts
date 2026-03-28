@@ -1,4 +1,4 @@
-import { RefObject, useEffect } from 'react';
+import { useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../store/useStore';
 import { DiskInfo, ScanResult } from '../types';
@@ -12,7 +12,7 @@ function parentOf(path: string): string | null {
   return raw.includes(':') && !raw.includes('\\') ? raw + '\\' : raw;
 }
 
-export function useKeyboard(searchRef?: RefObject<HTMLInputElement | null>) {
+export function useKeyboard() {
   const store = useStore();
 
   useEffect(() => {
@@ -183,7 +183,7 @@ export function useKeyboard(searchRef?: RefObject<HTMLInputElement | null>) {
       // Ctrl+F → focus search
       if (e.key === 'f' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        searchRef?.current?.focus();
+        (document.querySelector('.search-input') as HTMLInputElement | null)?.focus();
         return;
       }
 
@@ -204,5 +204,5 @@ export function useKeyboard(searchRef?: RefObject<HTMLInputElement | null>) {
 
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [store, searchRef]);
+  }, [store]);
 }

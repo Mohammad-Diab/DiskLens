@@ -11,6 +11,7 @@ interface ContextMenuProps {
   /** All entries the menu should act on (1 or many). */
   entries: FileEntry[];
   onClose: () => void;
+  onOpen: (entry: FileEntry) => void;
   onDeleteTrash: (entries: FileEntry[]) => void;
   onDeletePermanent: (entries: FileEntry[]) => void;
   onProperties: (e: FileEntry) => void;
@@ -22,6 +23,7 @@ export function ContextMenu({
   entry,
   entries,
   onClose,
+  onOpen,
   onDeleteTrash,
   onDeletePermanent,
   onProperties,
@@ -49,7 +51,7 @@ export function ContextMenu({
 
   // Clamp so the menu stays within the viewport
   const menuWidth  = 210;
-  const menuHeight = isMulti ? 130 : 260;
+  const menuHeight = isMulti ? 110 : isFolder ? 220 : 250;
   const left = x + menuWidth  > window.innerWidth  ? x - menuWidth  : x;
   const top  = y + menuHeight > window.innerHeight ? y - menuHeight : y;
 
@@ -85,7 +87,7 @@ export function ContextMenu({
       style={{ left, top }}
       onContextMenu={(e) => e.preventDefault()}
     >
-      {/* Header — shows item name or multi-select count */}
+      {/* Header */}
       <div className="ctx-header">
         <span className="ctx-header-name">
           {isMulti ? `${entries.length} items selected` : entry.name}
@@ -112,8 +114,51 @@ export function ContextMenu({
         </>
       )}
 
-      {/* ── Single item menu ── */}
-      {!isMulti && (
+      {/* ── Single folder menu ── */}
+      {!isMulti && isFolder && (
+        <>
+          <Item
+            label="Open"
+            onClick={action(() => onOpen(entry))}
+          />
+          <Item
+            label="Show in Explorer"
+            onClick={action(() =>
+              invoke('open_in_explorer', { path: entry.path }).catch(console.error)
+            )}
+          />
+
+          <Sep />
+
+          <Item
+            label="Copy Path"
+            onClick={action(() =>
+              invoke('copy_to_clipboard', { text: entry.path }).catch(console.error)
+            )}
+          />
+          <Item
+            label="Copy Name"
+            onClick={action(() =>
+              invoke('copy_to_clipboard', { text: entry.name }).catch(console.error)
+            )}
+          />
+
+          <Sep />
+
+          <Item
+            label="Send to Trash"
+            onClick={action(() => onDeleteTrash([entry]))}
+          />
+          <Item
+            label="Delete Permanently"
+            onClick={action(() => onDeletePermanent([entry]))}
+            danger
+          />
+        </>
+      )}
+
+      {/* ── Single file menu ── */}
+      {!isMulti && !isFolder && (
         <>
           <Item
             label="Open"
@@ -121,14 +166,6 @@ export function ContextMenu({
               invoke('open_path', { path: entry.path }).catch(console.error)
             )}
           />
-          {isFolder && (
-            <Item
-              label="Show in Explorer"
-              onClick={action(() =>
-                invoke('open_in_explorer', { path: entry.path }).catch(console.error)
-              )}
-            />
-          )}
 
           <Sep />
 
@@ -157,15 +194,12 @@ export function ContextMenu({
             danger
           />
 
-          {!isFolder && (
-            <>
-              <Sep />
-              <Item
-                label="Properties"
-                onClick={action(() => onProperties(entry))}
-              />
-            </>
-          )}
+          <Sep />
+
+          <Item
+            label="Properties"
+            onClick={action(() => onProperties(entry))}
+          />
         </>
       )}
     </div>

@@ -30,6 +30,7 @@
   cursor: pointer;
   border-bottom: 1px solid var(--border);
   box-sizing: border-box;
+  user-select: none;
 }
 
 .file-row:hover .file-cell { background: var(--bg-row-hover); }
@@ -68,6 +69,20 @@
 .file-row.row-green .file-cell { background: var(--row-green); }
 .file-row.row-selected .file-cell { background: #dbeafe !important; }
 .file-row.row-hidden { opacity: 0.55; }
+
+@media (prefers-color-scheme: dark) {
+  .file-row.row-selected .file-cell { background: #1e3a5f !important; }
+}
+
+/* ── Rubber-band selection rectangle ── */
+.rubber-band {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.5);
+  border-radius: 2px;
+  z-index: 50;
+}
 
 /* ── Name cell ── */
 .cell-name {
