@@ -1,5 +1,31 @@
 use crate::models::FileEntry;
 
+/// Open a file or folder with the OS default application.
+#[tauri::command]
+pub async fn open_path(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            std::process::Command::new("cmd")
+                .args(["/c", "start", "", path.as_str()])
+                .creation_flags(0x08000000) // CREATE_NO_WINDOW — suppress cmd flash
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
+        #[cfg(not(windows))]
+        {
+            std::process::Command::new("xdg-open")
+                .arg(&path)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
+        Ok::<(), String>(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub async fn pick_folder() -> Option<String> {
     tauri::async_runtime::spawn_blocking(|| {

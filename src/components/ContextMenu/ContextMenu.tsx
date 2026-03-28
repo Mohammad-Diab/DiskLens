@@ -6,67 +6,77 @@ import './ContextMenu.css';
 interface ContextMenuProps {
   x: number;
   y: number;
+  /** The right-clicked item — used for the header label. */
   entry: FileEntry;
+  /** All entries the menu should act on (1 or many). */
+  entries: FileEntry[];
   onClose: () => void;
-  onDeleteTrash: (entry: FileEntry) => void;
-  onDeletePermanent: (entry: FileEntry) => void;
-  onProperties: (entry: FileEntry) => void;
+  onDeleteTrash: (entries: FileEntry[]) => void;
+  onDeletePermanent: (entries: FileEntry[]) => void;
+  onProperties: (e: FileEntry) => void;
 }
 
 export function ContextMenu({
   x,
   y,
   entry,
+  entries,
   onClose,
   onDeleteTrash,
   onDeletePermanent,
   onProperties,
 }: ContextMenuProps) {
-  const menuRef = useRef<HTMLDivElement>(null);
+  const menuRef  = useRef<HTMLDivElement>(null);
+  const isMulti  = entries.length > 1;
+  const isFolder = entry.kind === 'folder';
 
   useEffect(() => {
-    function handleMouseDown(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        onClose();
-      }
+    function onMouseDown(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose();
     }
-    function handleScroll() {
-      onClose();
-    }
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
+    function onScroll()  { onClose(); }
+    function onKeyDown(e: KeyboardEvent) { if (e.key === 'Escape') onClose(); }
 
-    document.addEventListener('mousedown', handleMouseDown);
-    document.addEventListener('scroll', handleScroll, true);
-    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('scroll',    onScroll,  true);
+    document.addEventListener('keydown',   onKeyDown);
     return () => {
-      document.removeEventListener('mousedown', handleMouseDown);
-      document.removeEventListener('scroll', handleScroll, true);
-      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('scroll',    onScroll,  true);
+      document.removeEventListener('keydown',   onKeyDown);
     };
   }, [onClose]);
 
-  // Clamp position to viewport
-  const menuWidth = 200;
-  const menuHeight = 200;
-  const left = x + menuWidth > window.innerWidth ? x - menuWidth : x;
-  const top = y + menuHeight > window.innerHeight ? y - menuHeight : y;
+  // Clamp so the menu stays within the viewport
+  const menuWidth  = 210;
+  const menuHeight = isMulti ? 130 : 260;
+  const left = x + menuWidth  > window.innerWidth  ? x - menuWidth  : x;
+  const top  = y + menuHeight > window.innerHeight ? y - menuHeight : y;
 
-  function item(label: string, onClick: () => void, danger = false) {
+  function action(fn: () => void) {
+    return () => { fn(); onClose(); };
+  }
+
+  function Item({
+    label,
+    onClick,
+    danger = false,
+  }: {
+    label: string;
+    onClick: () => void;
+    danger?: boolean;
+  }) {
     return (
       <button
         className={`ctx-item${danger ? ' ctx-item-danger' : ''}`}
-        onMouseDown={(e) => {
-          e.preventDefault();
-          onClick();
-          onClose();
-        }}
+        onMouseDown={(e) => { e.preventDefault(); onClick(); }}
       >
         {label}
       </button>
     );
   }
+
+  function Sep() { return <div className="ctx-separator" />; }
 
   return (
     <div
@@ -75,20 +85,89 @@ export function ContextMenu({
       style={{ left, top }}
       onContextMenu={(e) => e.preventDefault()}
     >
-      {item('Open in Explorer', () =>
-        invoke('open_in_explorer', { path: entry.path })
+      {/* Header — shows item name or multi-select count */}
+      <div className="ctx-header">
+        <span className="ctx-header-name">
+          {isMulti ? `${entries.length} items selected` : entry.name}
+        </span>
+        {!isMulti && (
+          <span className="ctx-header-kind">{entry.kind}</span>
+        )}
+      </div>
+
+      <Sep />
+
+      {/* ── Multi-select menu ── */}
+      {isMulti && (
+        <>
+          <Item
+            label="Send to Trash"
+            onClick={action(() => onDeleteTrash(entries))}
+          />
+          <Item
+            label="Delete Permanently"
+            onClick={action(() => onDeletePermanent(entries))}
+            danger
+          />
+        </>
       )}
-      {item('Copy Path', () =>
-        invoke('copy_to_clipboard', { text: entry.path })
+
+      {/* ── Single item menu ── */}
+      {!isMulti && (
+        <>
+          <Item
+            label="Open"
+            onClick={action(() =>
+              invoke('open_path', { path: entry.path }).catch(console.error)
+            )}
+          />
+          {isFolder && (
+            <Item
+              label="Show in Explorer"
+              onClick={action(() =>
+                invoke('open_in_explorer', { path: entry.path }).catch(console.error)
+              )}
+            />
+          )}
+
+          <Sep />
+
+          <Item
+            label="Copy Path"
+            onClick={action(() =>
+              invoke('copy_to_clipboard', { text: entry.path }).catch(console.error)
+            )}
+          />
+          <Item
+            label="Copy Name"
+            onClick={action(() =>
+              invoke('copy_to_clipboard', { text: entry.name }).catch(console.error)
+            )}
+          />
+
+          <Sep />
+
+          <Item
+            label="Send to Trash"
+            onClick={action(() => onDeleteTrash([entry]))}
+          />
+          <Item
+            label="Delete Permanently"
+            onClick={action(() => onDeletePermanent([entry]))}
+            danger
+          />
+
+          {!isFolder && (
+            <>
+              <Sep />
+              <Item
+                label="Properties"
+                onClick={action(() => onProperties(entry))}
+              />
+            </>
+          )}
+        </>
       )}
-      {item('Copy Name', () =>
-        invoke('copy_to_clipboard', { text: entry.name })
-      )}
-      <div className="ctx-separator" />
-      {item('Send to Trash', () => onDeleteTrash(entry))}
-      {item('Delete Permanently', () => onDeletePermanent(entry), true)}
-      <div className="ctx-separator" />
-      {item('Properties', () => onProperties(entry))}
     </div>
   );
 }

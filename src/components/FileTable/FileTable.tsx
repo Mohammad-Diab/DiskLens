@@ -6,7 +6,7 @@ import {
   useReactTable,
 } from '@tanstack/react-table';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../../store/useStore';
 import { DiskInfo, FileEntry, ScanResult } from '../../types';
@@ -16,7 +16,17 @@ import './FileTable.css';
 
 const ROW_HEIGHT = 38;
 
-interface CtxState { x: number; y: number; entry: FileEntry; }
+interface CtxState {
+  x: number;
+  y: number;
+  entry: FileEntry;
+  entries: FileEntry[];  // items the menu acts on
+}
+
+interface RubberBand {
+  x0: number; y0: number;  // client viewport coords at mousedown
+  x1: number; y1: number;  // current client viewport coords
+}
 
 export function FileTable() {
   const entries        = useStore((s) => s.entries);
@@ -44,21 +54,25 @@ export function FileTable() {
   const setSidePanelItem = useStore((s) => s.setSidePanelItem);
   const setSidePanelOpen = useStore((s) => s.setSidePanelOpen);
 
-  const [sorting, setSorting]           = useState<SortingState>([{ id: 'sizeBytes', desc: true }]);
-  const [ctx, setCtx]                   = useState<CtxState | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<FileEntry | null>(null);
-  // Shallow listing for paths not yet in the scanned tree
+  const [sorting, setSorting]               = useState<SortingState>([{ id: 'sizeBytes', desc: true }]);
+  const [ctx, setCtx]                       = useState<CtxState | null>(null);
+  const [deleteTargets, setDeleteTargets]   = useState<FileEntry[] | null>(null);
   const [shallowEntries, setShallowEntries] = useState<FileEntry[]>([]);
+  const [rubberBand, setRubberBand]         = useState<RubberBand | null>(null);
+
   const anchorIndexRef = useRef<number | null>(null);
   const scrollRef      = useRef<HTMLDivElement>(null);
+  const rowsRef        = useRef<typeof rows>([]); // kept current for rubber-band closure
 
-  // Direct children from the deep scan tree
+  // ── In-tree entries for current path ───────────────────────────────────────
+
   const treeEntries = useMemo(() =>
     entries.filter((e) => e.parent.toLowerCase() === currentPath.toLowerCase()),
     [entries, currentPath]
   );
 
-  // When navigating to a path not in the tree, fetch a shallow listing
+  // ── Shallow listing for unscanned paths ────────────────────────────────────
+
   useEffect(() => {
     if (!currentPath || isScanning || treeEntries.length > 0) {
       setShallowEntries([]);
@@ -68,7 +82,6 @@ export function FileTable() {
     invoke<FileEntry[]>('get_dir_children', { path: currentPath })
       .then((children) => {
         if (cancelled) return;
-        // Enhance folder sizes with values from previously completed scans
         const enhanced = children.map((child) => {
           const known = knownTotals[child.path.toLowerCase()];
           if (child.kind === 'folder' && known !== undefined) {
@@ -82,10 +95,8 @@ export function FileTable() {
     return () => { cancelled = true; };
   }, [currentPath, treeEntries.length, isScanning]);
 
-  // The base list: prefer deep-scan tree; fall back to shallow listing
   const baseEntries = treeEntries.length > 0 ? treeEntries : shallowEntries;
 
-  // Apply search / kind / hidden filters
   const filtered = useMemo(() =>
     baseEntries.filter((e) => {
       if (!showHidden && e.isHidden) return false;
@@ -110,7 +121,11 @@ export function FileTable() {
     getSortedRowModel: getSortedRowModel(),
   });
 
-  const rows         = table.getRowModel().rows;
+  const rows = table.getRowModel().rows;
+
+  // keep rowsRef current for use inside event handler closures
+  useEffect(() => { rowsRef.current = rows; }, [rows]);
+
   const virtualizer  = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
@@ -119,13 +134,13 @@ export function FileTable() {
   });
   const virtualItems = virtualizer.getVirtualItems();
 
+  // ── Navigation ─────────────────────────────────────────────────────────────
+
   async function navigateTo(entry: FileEntry) {
     if (entry.kind !== 'folder' || isScanning) return;
-
     const inTree = entries.some(
       (e) => e.parent.toLowerCase() === entry.path.toLowerCase()
     );
-
     if (inTree) {
       navigate(entry.path);
     } else {
@@ -149,6 +164,8 @@ export function FileTable() {
     }
   }
 
+  // ── Row click / selection ──────────────────────────────────────────────────
+
   function handleRowClick(e: React.MouseEvent, entry: FileEntry, rowIndex: number) {
     const id = entry.id;
     if (e.shiftKey && anchorIndexRef.current !== null) {
@@ -170,7 +187,11 @@ export function FileTable() {
     setSelectedIds(new Set([id]));
   }
 
-  function handleCheckbox(e: React.ChangeEvent<HTMLInputElement>, entry: FileEntry, rowIndex: number) {
+  function handleCheckbox(
+    e: React.ChangeEvent<HTMLInputElement>,
+    entry: FileEntry,
+    rowIndex: number,
+  ) {
     e.stopPropagation();
     const next = new Set(selectedIds);
     next.has(entry.id) ? next.delete(entry.id) : next.add(entry.id);
@@ -184,23 +205,95 @@ export function FileTable() {
       : setSelectedIds(new Set(rows.map((r) => r.original.id)));
   }
 
-  async function handleDeleteTrash(entry: FileEntry) {
+  // ── Context menu ───────────────────────────────────────────────────────────
+
+  function handleContextMenu(e: React.MouseEvent, entry: FileEntry, rowIndex: number) {
+    e.preventDefault();
+    const inSelection = selectedIds.has(entry.id);
+
+    let targetEntries: FileEntry[];
+    if (inSelection && selectedIds.size > 1) {
+      // Right-click on a selected item → act on entire selection
+      targetEntries = rows
+        .filter((r) => selectedIds.has(r.original.id))
+        .map((r) => r.original);
+    } else {
+      // Right-click on an unselected item → select only that item
+      targetEntries = [entry];
+      setSelectedIds(new Set([entry.id]));
+      anchorIndexRef.current = rowIndex;
+    }
+
+    setCtx({ x: e.clientX, y: e.clientY, entry, entries: targetEntries });
+  }
+
+  // ── Delete helpers ─────────────────────────────────────────────────────────
+
+  async function handleDeleteTrash(entriesToDelete: FileEntry[]) {
     try {
-      await invoke('delete_to_trash', { paths: [entry.path] });
-      setEntries(entries.filter((e) => e.id !== entry.id));
+      await invoke('delete_to_trash', { paths: entriesToDelete.map((e) => e.path) });
+      const ids = new Set(entriesToDelete.map((e) => e.id));
+      setEntries(entries.filter((e) => !ids.has(e.id)));
       clearSelection();
     } catch (err) { console.error(err); }
   }
 
   async function confirmDeletePermanent() {
-    if (!deleteTarget) return;
+    if (!deleteTargets) return;
     try {
-      await invoke('delete_permanent', { paths: [deleteTarget.path] });
-      setEntries(entries.filter((e) => e.id !== deleteTarget.id));
+      await invoke('delete_permanent', { paths: deleteTargets.map((e) => e.path) });
+      const ids = new Set(deleteTargets.map((e) => e.id));
+      setEntries(entries.filter((e) => !ids.has(e.id)));
       clearSelection();
     } catch (err) { console.error(err); }
-    finally { setDeleteTarget(null); }
+    finally { setDeleteTargets(null); }
   }
+
+  // ── Rubber-band selection ──────────────────────────────────────────────────
+
+  const handleBodyMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    // Only start rubber-band on background (not on a row)
+    if ((e.target as HTMLElement).closest('.file-row')) return;
+    if (e.button !== 0) return;
+
+    clearSelection();
+    const container = scrollRef.current!;
+    const rect = container.getBoundingClientRect();
+    const x0Client = e.clientX;
+    const y0Client = e.clientY;
+
+    setRubberBand({ x0: x0Client, y0: y0Client, x1: x0Client, y1: y0Client });
+
+    function onMove(me: MouseEvent) {
+      setRubberBand({ x0: x0Client, y0: y0Client, x1: me.clientX, y1: me.clientY });
+
+      // Compute which rows intersect the band (using row index * height)
+      const scrollTop = scrollRef.current?.scrollTop ?? 0;
+      const y0Scroll = y0Client - rect.top + scrollTop;
+      const y1Scroll = me.clientY - rect.top + scrollTop;
+      const top    = Math.min(y0Scroll, y1Scroll);
+      const bottom = Math.max(y0Scroll, y1Scroll);
+
+      if (bottom - top < 4) return; // too small to count as a drag
+
+      const ids = new Set<string>();
+      rowsRef.current.forEach((row, i) => {
+        const rowTop    = i * ROW_HEIGHT;
+        const rowBottom = rowTop + ROW_HEIGHT;
+        if (rowTop < bottom && rowBottom > top) ids.add(row.original.id);
+      });
+      setSelectedIds(ids);
+    }
+
+    function onUp() {
+      setRubberBand(null);
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup',   onUp);
+    }
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup',   onUp);
+  }, [clearSelection, setSelectedIds]);
 
   const allSelected  = rows.length > 0 && selectedIds.size === rows.length;
   const someSelected = selectedIds.size > 0 && selectedIds.size < rows.length;
@@ -208,12 +301,6 @@ export function FileTable() {
 
   return (
     <div className="file-table-wrapper">
-      {selectedIds.size > 0 && (
-        <div className="selection-bar">
-          {selectedIds.size} item{selectedIds.size !== 1 ? 's' : ''} selected
-        </div>
-      )}
-
       {/* Sticky header */}
       <div className="file-table-head">
         <div className="file-row file-row-header">
@@ -241,7 +328,11 @@ export function FileTable() {
       </div>
 
       {/* Virtual scroll body */}
-      <div ref={scrollRef} className="file-table-body">
+      <div
+        ref={scrollRef}
+        className="file-table-body"
+        onMouseDown={handleBodyMouseDown}
+      >
         <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
           {virtualItems.map((vRow) => {
             const row    = rows[vRow.index];
@@ -267,11 +358,14 @@ export function FileTable() {
                   height: ROW_HEIGHT,
                 }}
                 onClick={(e) => handleRowClick(e, entry, vRow.index)}
-                onDoubleClick={() => navigateTo(entry)}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setCtx({ x: e.clientX, y: e.clientY, entry });
+                onDoubleClick={() => {
+                  if (entry.kind === 'folder') {
+                    navigateTo(entry);
+                  } else {
+                    invoke('open_path', { path: entry.path }).catch(console.error);
+                  }
                 }}
+                onContextMenu={(e) => handleContextMenu(e, entry, vRow.index)}
               >
                 <div className="file-cell col-checkbox" onClick={(e) => e.stopPropagation()}>
                   <input
@@ -293,6 +387,21 @@ export function FileTable() {
             );
           })}
         </div>
+
+        {/* Rubber-band selection rectangle */}
+        {rubberBand && scrollRef.current && (() => {
+          const rect = scrollRef.current.getBoundingClientRect();
+          const left   = Math.min(rubberBand.x0, rubberBand.x1) - rect.left;
+          const top    = Math.min(rubberBand.y0, rubberBand.y1) - rect.top + scrollRef.current.scrollTop;
+          const width  = Math.abs(rubberBand.x1 - rubberBand.x0);
+          const height = Math.abs(rubberBand.y1 - rubberBand.y0);
+          return (
+            <div
+              className="rubber-band"
+              style={{ left, top, width, height }}
+            />
+          );
+        })()}
       </div>
 
       {/* Scanning overlay */}
@@ -339,21 +448,27 @@ export function FileTable() {
           x={ctx.x}
           y={ctx.y}
           entry={ctx.entry}
+          entries={ctx.entries}
           onClose={() => setCtx(null)}
           onDeleteTrash={handleDeleteTrash}
-          onDeletePermanent={(e) => setDeleteTarget(e)}
+          onDeletePermanent={(entriesToDelete) => {
+            setDeleteTargets(entriesToDelete);
+            setCtx(null);
+          }}
           onProperties={(e) => { setSidePanelItem(e); setSidePanelOpen(true); }}
         />
       )}
 
-      {deleteTarget && (
-        <div className="dialog-overlay" onClick={() => setDeleteTarget(null)}>
+      {deleteTargets && (
+        <div className="dialog-overlay" onClick={() => setDeleteTargets(null)}>
           <div className="dialog" onClick={(e) => e.stopPropagation()}>
             <h2>Delete Permanently</h2>
             <p className="dialog-warning">This cannot be undone:</p>
-            <div className="dialog-item"><strong>{deleteTarget.name}</strong></div>
+            {deleteTargets.map((e) => (
+              <div key={e.id} className="dialog-item"><strong>{e.name}</strong></div>
+            ))}
             <div className="dialog-actions">
-              <button className="btn-cancel" onClick={() => setDeleteTarget(null)}>Cancel</button>
+              <button className="btn-cancel" onClick={() => setDeleteTargets(null)}>Cancel</button>
               <button className="btn-danger" onClick={confirmDeletePermanent}>Delete Permanently</button>
             </div>
           </div>

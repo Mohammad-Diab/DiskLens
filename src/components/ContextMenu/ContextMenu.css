@@ -4,12 +4,42 @@
   background: var(--bg-base);
   border: 1px solid var(--border);
   border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-  padding: 4px 0;
-  min-width: 190px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18);
+  padding: 0;
+  min-width: 210px;
   font-size: 13px;
+  overflow: hidden;
 }
 
+/* ── Header ── */
+.ctx-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 14px 7px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.ctx-header-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.ctx-header-kind {
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-transform: capitalize;
+  flex-shrink: 0;
+}
+
+/* ── Menu items ── */
 .ctx-item {
   display: block;
   width: 100%;
@@ -19,20 +49,17 @@
   border: none;
   cursor: pointer;
   color: var(--text-primary);
-  border-radius: 0;
   font-size: 13px;
 }
 
-.ctx-item:hover {
-  background: var(--bg-surface);
-}
+.ctx-item:hover { background: var(--bg-surface); }
 
-.ctx-item-danger {
-  color: #ef4444;
-}
+.ctx-item-danger { color: #ef4444; }
+.ctx-item-danger:hover { background: #fee2e2; }
 
+/* ── Separator ── */
 .ctx-separator {
   height: 1px;
   background: var(--border);
-  margin: 4px 0;
+  margin: 3px 0;
 }
