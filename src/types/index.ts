@@ -41,4 +41,6 @@ export interface ScanResult {
   path: string;
   entries: FileEntry[];
   total: number;
+  /** Every scanned directory and its accumulated byte size. */
+  folderSizes: Record<string, number>;
 }

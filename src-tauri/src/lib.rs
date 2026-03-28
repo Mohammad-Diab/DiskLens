@@ -28,6 +28,7 @@ pub fn run() {
             system::get_file_info,
             system::pick_folder,
             system::get_path_suggestions,
+            system::is_admin,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

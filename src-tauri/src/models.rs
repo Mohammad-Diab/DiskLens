@@ -76,4 +76,7 @@ pub struct ScanResult {
     pub path: String,
     pub entries: Vec<FileEntry>,
     pub total: u64,
+    /// Size of every scanned directory (path → bytes). Used by the frontend to
+    /// populate knownTotals so lazy-navigated sub-folders show correct sizes.
+    pub folder_sizes: std::collections::HashMap<String, u64>,
 }

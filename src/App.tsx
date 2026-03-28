@@ -1,5 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 import './App.css';
 import { Breadcrumb } from './components/Breadcrumb/Breadcrumb';
 import { FileTable } from './components/FileTable/FileTable';
@@ -9,11 +10,20 @@ import { Toolbar } from './components/Toolbar/Toolbar';
 import { useKeyboard } from './hooks/useKeyboard';
 import { useStore } from './store/useStore';
 
+const BANNER_KEY = 'disklens-admin-banner-dismissed';
+
 function App() {
   const sidePanelOpen = useStore((s) => s.sidePanelOpen);
+  const [bannerVisible, setBannerVisible] = useState(() => localStorage.getItem(BANNER_KEY) !== '1');
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    invoke<boolean>('is_admin').then(setIsAdmin).catch(() => {});
+  }, []);
   const entries         = useStore((s) => s.entries);
   const isScanning      = useStore((s) => s.isScanning);
   const setScanProgress = useStore((s) => s.setScanProgress);
+  const setScanStatus   = useStore((s) => s.setScanStatus);
 
   useKeyboard();
 
@@ -26,6 +36,15 @@ function App() {
     return () => { unlisten?.(); };
   }, [setScanProgress]);
 
+  // Listen to scan_status events from Rust (phase descriptions)
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<string>('scan_status', (event) => {
+      setScanStatus(event.payload);
+    }).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, [setScanStatus]);
+
   // Reset progress counter when a new scan begins
   useEffect(() => {
     if (isScanning) setScanProgress(0);
@@ -33,9 +52,28 @@ function App() {
 
   const hasScanned = entries.length > 0 || isScanning;
 
+  const banner = bannerVisible && (
+    <div className="app-banner">
+      <span className="app-banner-icon">⚡</span>
+      <span className="app-banner-text">
+        {isAdmin
+          ? 'Select a drive root (e.g. C:\\) for ultra-fast NTFS scanning via the file index.'
+          : 'Run as Administrator and select a drive root (e.g. C:\\) for ultra-fast NTFS scanning via the file index.'}
+      </span>
+      <button
+        className="app-banner-close"
+        onClick={() => { localStorage.setItem(BANNER_KEY, '1'); setBannerVisible(false); }}
+        aria-label="Dismiss"
+      >
+        ✕
+      </button>
+    </div>
+  );
+
   if (!hasScanned) {
     return (
       <div className="app app-hero">
+        {banner}
         <div className="hero-center">
           <div className="hero-logo">
             <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
@@ -57,6 +95,7 @@ function App() {
 
   return (
     <div className="app">
+      {banner}
       <Toolbar />
       <Breadcrumb />
       <div className="main-content">

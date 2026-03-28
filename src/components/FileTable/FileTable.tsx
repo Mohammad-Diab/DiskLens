@@ -32,6 +32,7 @@ export function FileTable() {
   const entries        = useStore((s) => s.entries);
   const isScanning     = useStore((s) => s.isScanning);
   const scanProgress   = useStore((s) => s.scanProgress);
+  const scanStatus     = useStore((s) => s.scanStatus);
   const isPaused       = useStore((s) => s.isPaused);
   const visibleColumns = useStore((s) => s.visibleColumns);
   const selectedIds    = useStore((s) => s.selectedIds);
@@ -43,6 +44,7 @@ export function FileTable() {
 
   const navigate         = useStore((s) => s.navigate);
   const setEntries       = useStore((s) => s.setEntries);
+  const setViewEntries   = useStore((s) => s.setViewEntries);
   const setIsScanning    = useStore((s) => s.setIsScanning);
   const setIsPaused      = useStore((s) => s.setIsPaused);
   const setSelectedIds   = useStore((s) => s.setSelectedIds);
@@ -79,13 +81,19 @@ export function FileTable() {
     invoke<FileEntry[]>('get_dir_children', { path: currentPath })
       .then((children) => {
         if (cancelled) return;
-        const enhanced = children.map((child) => {
+        // Resolve known folder sizes
+        const withSizes = children.map((child) => {
           if (child.kind !== 'folder') return child;
           const known = knownTotals[child.path.toLowerCase()];
           if (known !== undefined) return { ...child, sizeBytes: known, sizeOnDisk: known };
-          // Mark unscanned folders with -1 so the size column shows "—"
           return { ...child, sizeBytes: -1, sizeOnDisk: -1 };
         });
+        // Compute pctParent so row coloring works the same as in scanned folders
+        const totalVisible = withSizes.reduce((s, e) => s + Math.max(0, e.sizeBytes), 0);
+        const enhanced = withSizes.map((e) => ({
+          ...e,
+          pctParent: totalVisible > 0 ? (Math.max(0, e.sizeBytes) / totalVisible) * 100 : 0,
+        }));
         setShallowEntries(enhanced);
       })
       .catch(() => { if (!cancelled) setShallowEntries([]); });
@@ -93,6 +101,9 @@ export function FileTable() {
   }, [currentPath, treeEntries.length, isScanning]);
 
   const baseEntries = treeEntries.length > 0 ? treeEntries : shallowEntries;
+
+  // Keep the store in sync so Toolbar filter chips see the right entries
+  useEffect(() => { setViewEntries(baseEntries); }, [baseEntries]);
 
   const filtered = useMemo(() =>
     baseEntries.filter((e) => {
@@ -314,10 +325,21 @@ export function FileTable() {
             const isSelected = selectedIds.has(entry.id);
             const pct = entry.pctParent;
             let rowClass = 'file-row';
-            if (isSelected)    rowClass += ' row-selected';
-            else if (pct > 30)  rowClass += ' row-red';
-            else if (pct >= 10) rowClass += ' row-amber';
-            else if (pct > 0)   rowClass += ' row-green';
+            if (isSelected) {
+              rowClass += ' row-selected';
+            } else if (pct <= 0) {
+              rowClass += ' row-zero';
+            } else if (pct < 5)  {
+              rowClass += ' row-t1';
+            } else if (pct < 20) {
+              rowClass += ' row-t2';
+            } else if (pct < 40) {
+              rowClass += ' row-t3';
+            } else if (pct < 65) {
+              rowClass += ' row-t4';
+            } else {
+              rowClass += ' row-t5';
+            }
             if (entry.isHidden) rowClass += ' row-hidden';
 
             return (
@@ -387,6 +409,11 @@ export function FileTable() {
               ? 'Paused'
               : `Scanning${scanProgress > 0 ? ` — ${scanProgress.toLocaleString()} items found` : '…'}`}
           </span>
+          {scanStatus && !isPaused && (
+            <span key={scanStatus} className="table-scan-status">
+              {scanStatus}
+            </span>
+          )}
           <div className="table-scan-actions">
             <button
               className="scan-ctrl-btn"

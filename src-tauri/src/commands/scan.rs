@@ -1,3 +1,32 @@
+//! # DiskLens — scan engine
+//!
+//! ## Scan strategy (auto-selected at runtime)
+//!
+//! | Condition                              | Path used            | Typical speed       |
+//! |----------------------------------------|----------------------|---------------------|
+//! | NTFS fixed drive root + admin          | USN Journal          | ~2 M entries / sec  |
+//! | Everything else                        | Rayon parallel walk  | ~200 K entries / sec|
+//!
+//! ### USN Journal path (`scan_dir_usn`)
+//! Uses `FSCTL_ENUM_USN_DATA` (0x900B3) to read every MFT record without touching
+//! raw sectors.  Three phases:
+//!   1. Enumerate all records → `HashMap<frn, UsnEntry>` (name, parent FRN, attrs)
+//!   2. BFS from NTFS root (FRN 5) → `HashMap<frn, full_path>`
+//!   3. Filter to target root, fetch file sizes in parallel via rayon `metadata()`
+//!
+//! Only applicable when scanning an exact drive root (`C:\`), the volume is NTFS,
+//! the drive is a local fixed disk, and the process has admin rights (volume handle).
+//!
+//! ### Rayon parallel path (`scan_parallel`)
+//! Recursive rayon work-stealing walk using `std::fs::read_dir`.  Emits milestone
+//! status messages at 10 K / 50 K / 100 K / 250 K / 500 K items.
+//!
+//! ### IPC size cap
+//! Both paths trim the returned `entries` Vec to direct children of the scan root
+//! before sending over Tauri IPC (2 M entries ≈ 800 MB JSON → process crash).
+//! All folder sizes are included in `ScanResult.folder_sizes` so the frontend can
+//! show correct sizes for lazily-navigated sub-directories without re-scanning.
+
 use crate::models::{DiskInfo, FileEntry, FileKind, ScanResult};
 use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
@@ -149,27 +178,25 @@ pub async fn scan_dir(
     let paused = Arc::clone(&scan_control.paused);
 
     Ok(tauri::async_runtime::spawn_blocking(move || {
-        let emit = |count: u64| { let _ = app.emit("scan_progress", count); };
+        let emit        = |count: u64| { let _ = app.emit("scan_progress", count); };
+        let emit_status = |msg: &str|  { let _ = app.emit("scan_status", msg.to_string()); };
 
         // USN journal fast path: NTFS fixed drive root + admin access
         #[cfg(windows)]
         if should_use_usn(&path) {
-            println!("[DiskLens] Using USN journal for: {}", path);
-            if let Some(result) = scan_dir_usn(&path, &emit, &stop, &paused) {
+            emit_status(&format!("Reading file index for {}…", path));
+            if let Some(result) = scan_dir_usn(&path, &emit, &emit_status, &stop, &paused) {
                 return result;
             }
-            println!("[DiskLens] USN failed, falling back to parallel scan");
-        }
-        #[cfg(windows)]
-        if !should_use_usn(&path) {
-            println!("[DiskLens] Using parallel scan for: {}", path);
+            emit_status("Switching to directory scan…");
         }
 
         // Rayon parallel scan (fallback for non-NTFS, non-admin, or subdirectories)
-        scan_parallel(&path, &emit, &stop, &paused)
+        emit_status(&format!("Scanning {}…", path));
+        scan_parallel(&path, &emit, &emit_status, &stop, &paused)
     })
     .await
-    .unwrap_or_else(|_| ScanResult { path: String::new(), entries: vec![], total: 0 }))
+    .unwrap_or_else(|_| ScanResult { path: String::new(), entries: vec![], total: 0, folder_sizes: Default::default() }))
 }
 
 #[tauri::command]
@@ -289,7 +316,7 @@ struct RawEntry {
 
 fn build_result_from_raw(root: String, raw: Vec<RawEntry>) -> ScanResult {
     if raw.is_empty() {
-        return ScanResult { path: root, entries: vec![], total: 0 };
+        return ScanResult { path: root, entries: vec![], total: 0, folder_sizes: Default::default() };
     }
 
     // Cumulative folder sizes (files propagate up to parents)
@@ -367,7 +394,7 @@ fn build_result_from_raw(root: String, raw: Vec<RawEntry>) -> ScanResult {
         })
         .collect();
 
-    ScanResult { path: root, entries, total: total_size }
+    ScanResult { path: root, entries, total: total_size, folder_sizes: folder_size }
 }
 
 // ─── USN Journal scan (Windows, NTFS fixed drive root, admin) ────────────────
@@ -381,6 +408,7 @@ fn build_result_from_raw(root: String, raw: Vec<RawEntry>) -> ScanResult {
 fn scan_dir_usn(
     root: &str,
     emit: &impl Fn(u64),
+    emit_status: &impl Fn(&str),
     stop: &Arc<AtomicBool>,
     paused: &Arc<AtomicBool>,
 ) -> Option<ScanResult> {
@@ -518,6 +546,7 @@ fn scan_dir_usn(
     }
     unsafe { CloseHandle(handle); }
     emit(count);
+    emit_status(&format!("Found {:} files and folders — building paths…", count));
     println!("[DiskLens] USN Phase 1: {} entries", count);
 
     if stop.load(Ordering::Relaxed) { return None; }
@@ -552,6 +581,7 @@ fn scan_dir_usn(
             }
         }
     }
+    emit_status(&format!("Resolved {:} paths — measuring file sizes…", resolved.len()));
     println!("[DiskLens] USN Phase 2: {} paths resolved", resolved.len());
 
     // Free children_of — BFS is done, it's no longer needed (~100 MB freed)
@@ -629,6 +659,7 @@ fn scan_dir_usn(
         }
     }).collect();
 
+    emit_status("Calculating folder sizes…");
     println!("[DiskLens] USN complete: {} raw entries", raw.len());
 
     // Build full result (size aggregation uses all entries), then trim the IPC
@@ -642,6 +673,18 @@ fn scan_dir_usn(
     Some(result)
 }
 
+// ─── Number formatting helper ─────────────────────────────────────────────────
+
+fn fmt_count(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    for (i, ch) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 { out.push(','); }
+        out.push(ch);
+    }
+    out.chars().rev().collect()
+}
+
 // ─── Rayon parallel scan (all platforms, all drive types) ────────────────────
 //
 // Recursively reads directories in parallel using rayon work-stealing.
@@ -649,11 +692,12 @@ fn scan_dir_usn(
 // only a brief lock per directory batch to extend the shared Vec.
 
 fn par_scan_inner(
-    dir:   std::path::PathBuf,
-    raw:   &Mutex<Vec<RawEntry>>,
-    count: &AtomicU64,
-    stop:  &Arc<AtomicBool>,
-    paused: &Arc<AtomicBool>,
+    dir:         std::path::PathBuf,
+    raw:         &Mutex<Vec<RawEntry>>,
+    count:       &AtomicU64,
+    emit_status: &(impl Fn(&str) + Sync),
+    stop:        &Arc<AtomicBool>,
+    paused:      &Arc<AtomicBool>,
 ) {
     if stop.load(Ordering::Relaxed) { return; }
 
@@ -665,8 +709,8 @@ fn par_scan_inner(
     let Ok(read_dir) = std::fs::read_dir(&dir) else { return };
     let dir_str = normalize_path(&dir.to_string_lossy());
 
-    let mut batch:   Vec<RawEntry>              = Vec::new();
-    let mut subdirs: Vec<std::path::PathBuf>    = Vec::new();
+    let mut batch:   Vec<RawEntry>           = Vec::new();
+    let mut subdirs: Vec<std::path::PathBuf> = Vec::new();
 
     for entry in read_dir.filter_map(|e| e.ok()) {
         if stop.load(Ordering::Relaxed) { return; }
@@ -698,34 +742,42 @@ fn par_scan_inner(
 
         let n = count.fetch_add(1, Ordering::Relaxed) + 1;
         if n % 5_000 == 0 {
-            // flush batch to shared vec periodically to avoid large allocations
             raw.lock().unwrap().extend(batch.drain(..));
+        }
+        // Emit readable status at key milestones
+        match n {
+            10_000 | 50_000 | 100_000 | 250_000 | 500_000 => {
+                emit_status(&format!("Scanning… {:} items found", fmt_count(n)));
+            }
+            n if n % 500_000 == 0 => {
+                emit_status(&format!("Scanning… {:} items found", fmt_count(n)));
+            }
+            _ => {}
         }
 
         if is_dir { subdirs.push(path); }
     }
 
-    // Flush remaining batch
     if !batch.is_empty() {
         raw.lock().unwrap().extend(batch);
     }
 
-    // Recurse into subdirectories in parallel
     use rayon::prelude::*;
     subdirs.into_par_iter().for_each(|subdir| {
-        par_scan_inner(subdir, raw, count, stop, paused);
+        par_scan_inner(subdir, raw, count, emit_status, stop, paused);
     });
 }
 
 fn scan_parallel(
-    root:   &str,
-    emit:   &impl Fn(u64),
-    stop:   &Arc<AtomicBool>,
-    paused: &Arc<AtomicBool>,
+    root:        &str,
+    emit:        &impl Fn(u64),
+    emit_status: &(impl Fn(&str) + Sync),
+    stop:        &Arc<AtomicBool>,
+    paused:      &Arc<AtomicBool>,
 ) -> ScanResult {
     let root_norm = normalize_path(root);
     if !std::path::Path::new(&root_norm).exists() {
-        return ScanResult { path: root_norm, entries: vec![], total: 0 };
+        return ScanResult { path: root_norm, entries: vec![], total: 0, folder_sizes: Default::default() };
     }
 
     let raw   = Mutex::new(Vec::<RawEntry>::with_capacity(50_000));
@@ -735,12 +787,14 @@ fn scan_parallel(
         std::path::PathBuf::from(&root_norm),
         &raw,
         &count,
+        emit_status,
         stop,
         paused,
     );
 
     let final_count = count.load(Ordering::Relaxed);
     emit(final_count);
+    emit_status("Calculating folder sizes…");
 
     let mut result = build_result_from_raw(root_norm, raw.into_inner().unwrap());
 
