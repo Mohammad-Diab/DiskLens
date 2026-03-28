@@ -24,7 +24,7 @@ export function Toolbar({ showFilters = true }: ToolbarProps) {
   const {
     currentPath,
     isScanning,
-    entries,
+    viewEntries,
     activeFilter,
     showHidden,
     navigate,
@@ -33,6 +33,7 @@ export function Toolbar({ showFilters = true }: ToolbarProps) {
     setIsScanning,
     setDiskInfo,
     setKnownTotal,
+    mergeKnownTotals,
     setActiveFilter,
     setSearchQuery,
     setShowHidden,
@@ -113,6 +114,7 @@ export function Toolbar({ showFilters = true }: ToolbarProps) {
       setEntries(result.entries);
       setScanRoot(result.path);
       setKnownTotal(result.path, result.total);
+      mergeKnownTotals(result.folderSizes);
       const drive = (driveList as DiskInfo[]).find((d) =>
         result.path.toLowerCase().startsWith(d.driveLetter.toLowerCase())
       );
@@ -149,12 +151,9 @@ export function Toolbar({ showFilters = true }: ToolbarProps) {
     setShowDropdown(false);
   }
 
-  // Count only direct children of the current folder
-  const currentEntries = entries.filter(
-    (e) => e.parent.toLowerCase() === currentPath.toLowerCase()
-  );
-  const kindCounts: Record<string, number> = { all: currentEntries.length };
-  currentEntries.forEach((e) => {
+  // viewEntries is kept in sync by FileTable (covers both scanned and lazy-loaded folders)
+  const kindCounts: Record<string, number> = { all: viewEntries.length };
+  viewEntries.forEach((e) => {
     kindCounts[e.kind] = (kindCounts[e.kind] ?? 0) + 1;
   });
 

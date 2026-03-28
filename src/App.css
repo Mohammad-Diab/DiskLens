@@ -153,3 +153,53 @@ select {
   min-width: 180px;
   justify-content: center;
 }
+
+/* ── App-level info banner (top of window, both hero and normal views) ── */
+.app-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 14px;
+  background: #eff6ff;
+  border-bottom: 1px solid #bfdbfe;
+  font-size: 12px;
+  color: #1e40af;
+  flex-shrink: 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .app-banner {
+    background: #1e2e4a;
+    border-bottom-color: #2d4a7a;
+    color: #93c5fd;
+  }
+}
+
+.app-banner-icon {
+  flex-shrink: 0;
+  font-size: 13px;
+}
+
+.app-banner-text {
+  flex: 1;
+  line-height: 1.4;
+}
+
+.app-banner-close {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  opacity: 0.55;
+  font-size: 12px;
+  padding: 2px 5px;
+  line-height: 1;
+  border-radius: 3px;
+}
+
+.app-banner-close:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.07);
+}

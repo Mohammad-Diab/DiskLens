@@ -2,12 +2,15 @@
   display: flex;
   align-items: center;
   flex-wrap: nowrap;
-  overflow: hidden;
+  /* overflow must be visible so the column dropdown can escape the bar */
+  overflow: visible;
   padding: 4px 8px;
   background: var(--bg-base);
   border-bottom: 1px solid var(--border);
   font-size: 12px;
   gap: 2px;
+  position: relative;
+  z-index: 100; /* above table rows which use position:absolute */
 }
 
 /* ── Nav buttons (back / forward / up) ── */

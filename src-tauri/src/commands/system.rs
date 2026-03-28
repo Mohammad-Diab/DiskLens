@@ -1,5 +1,59 @@
 use crate::models::FileEntry;
 
+/// Returns true when the process has administrator / elevated privileges.
+#[tauri::command]
+pub async fn is_admin() -> bool {
+    #[cfg(windows)]
+    {
+        tauri::async_runtime::spawn_blocking(|| {
+            use std::ffi::c_void;
+            // CheckTokenMembership with the built-in Administrators SID
+            extern "system" {
+                fn AllocateAndInitializeSid(
+                    pIdentifierAuthority: *const [u8; 6],
+                    nSubAuthorityCount: u8,
+                    nSubAuthority0: u32,
+                    nSubAuthority1: u32,
+                    nSubAuthority2: u32,
+                    nSubAuthority3: u32,
+                    nSubAuthority4: u32,
+                    nSubAuthority5: u32,
+                    nSubAuthority6: u32,
+                    nSubAuthority7: u32,
+                    pSid: *mut *mut c_void,
+                ) -> i32;
+                fn CheckTokenMembership(
+                    TokenHandle: *mut c_void,
+                    SidToCheck: *mut c_void,
+                    IsMember: *mut i32,
+                ) -> i32;
+                fn FreeSid(pSid: *mut c_void) -> *mut c_void;
+            }
+            // SECURITY_NT_AUTHORITY
+            let authority: [u8; 6] = [0, 0, 0, 0, 0, 5];
+            // SECURITY_BUILTIN_DOMAIN_RID = 32, DOMAIN_ALIAS_RID_ADMINS = 544
+            let mut sid: *mut c_void = std::ptr::null_mut();
+            let ok = unsafe {
+                AllocateAndInitializeSid(
+                    &authority, 2, 32, 544, 0, 0, 0, 0, 0, 0, &mut sid,
+                )
+            };
+            if ok == 0 || sid.is_null() { return false; }
+            let mut is_member: i32 = 0;
+            let check = unsafe { CheckTokenMembership(std::ptr::null_mut(), sid, &mut is_member) };
+            unsafe { FreeSid(sid) };
+            check != 0 && is_member != 0
+        })
+        .await
+        .unwrap_or(false)
+    }
+    #[cfg(not(windows))]
+    {
+        // On Unix, check effective UID == 0
+        unsafe { libc::geteuid() == 0 }
+    }
+}
+
 /// Open a file or folder with the OS default application.
 #[tauri::command]
 pub async fn open_path(path: String) -> Result<(), String> {

@@ -4,7 +4,7 @@ import { DiskInfo, FileEntry, FileKind } from '../types';
 const DEFAULT_VISIBLE_COLUMNS = [
   'name',
   'sizeBytes',
-  'sizeOnDisk',
+  'pctParent',
   'kind',
   'modified',
 ];
@@ -41,10 +41,15 @@ interface AppState {
   searchQuery: string;
   showHidden: boolean;
   scanProgress: number;
+  scanStatus: string;
   isPaused: boolean;
   knownTotals: Record<string, number>; // lowercase path → total bytes
 
+  // The entries currently visible in the table (for filter-chip counts)
+  viewEntries: FileEntry[];
+
   // Actions
+  setViewEntries: (entries: FileEntry[]) => void;
   navigate: (path: string) => void;
   goBack: () => void;
   goForward: () => void;
@@ -64,8 +69,10 @@ interface AppState {
   setSearchQuery: (q: string) => void;
   setShowHidden: (v: boolean) => void;
   setScanProgress: (n: number) => void;
+  setScanStatus: (s: string) => void;
   setIsPaused: (v: boolean) => void;
   setKnownTotal: (path: string, total: number) => void;
+  mergeKnownTotals: (totals: Record<string, number>) => void;
   resetScan: () => void;
 }
 
@@ -73,6 +80,7 @@ export const useStore = create<AppState>((set, get) => ({
   currentPath: '',
   scanRoot: '',
   entries: [],
+  viewEntries: [],
   isScanning: false,
   diskInfo: null,
   breadcrumbs: [],
@@ -84,8 +92,9 @@ export const useStore = create<AppState>((set, get) => ({
   visibleColumns: DEFAULT_VISIBLE_COLUMNS,
   activeFilter: 'all',
   searchQuery: '',
-  showHidden: false,
+  showHidden: true,
   scanProgress: 0,
+  scanStatus: '',
   isPaused: false,
   knownTotals: {},
 
@@ -131,6 +140,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   setScanRoot: (path) => set({ scanRoot: path }),
   setEntries: (entries) => set({ entries }),
+  setViewEntries: (viewEntries) => set({ viewEntries }),
   setIsScanning: (v) => set({ isScanning: v }),
   setDiskInfo: (info) => set({ diskInfo: info }),
   setSelectedIds: (ids) => set({ selectedIds: new Set(ids) }),
@@ -148,13 +158,22 @@ export const useStore = create<AppState>((set, get) => ({
   setSearchQuery: (q) => set({ searchQuery: q }),
   setShowHidden: (v) => set({ showHidden: v }),
   setScanProgress: (n) => set({ scanProgress: n }),
+  setScanStatus: (s) => set({ scanStatus: s }),
   setIsPaused: (v) => set({ isPaused: v }),
   setKnownTotal: (path, total) => set((state) => ({
     knownTotals: { ...state.knownTotals, [path.toLowerCase()]: total },
   })),
+  mergeKnownTotals: (totals) => set((state) => {
+    const merged: Record<string, number> = { ...state.knownTotals };
+    for (const [path, size] of Object.entries(totals)) {
+      merged[path.toLowerCase()] = size;
+    }
+    return { knownTotals: merged };
+  }),
 
   resetScan: () => set({
     entries: [],
+    viewEntries: [],
     currentPath: '',
     scanRoot: '',
     breadcrumbs: [],
@@ -163,6 +182,7 @@ export const useStore = create<AppState>((set, get) => ({
     searchQuery: '',
     activeFilter: 'all',
     scanProgress: 0,
+    scanStatus: '',
     isPaused: false,
     knownTotals: {},
     sidePanelOpen: false,

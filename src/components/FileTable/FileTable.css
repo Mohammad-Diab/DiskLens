@@ -64,9 +64,15 @@
 }
 
 /* ── Row color coding ── */
-.file-row.row-red .file-cell { background: var(--row-red); }
-.file-row.row-amber .file-cell { background: var(--row-amber); }
-.file-row.row-green .file-cell { background: var(--row-green); }
+/* 6 tiers: gray (zero) + 5 size tiers (green → red).
+   Each tier sets a background on the row; cells must be transparent to show it. */
+.file-row .file-cell { background: transparent; }
+.file-row.row-zero .file-cell { background: rgba(128, 128, 128, 0.07); }
+.file-row.row-t1   .file-cell { background: rgba(34,  197,  94, 0.13); } /* < 5%  — green */
+.file-row.row-t2   .file-cell { background: rgba(163, 230,  53, 0.15); } /* < 20% — lime */
+.file-row.row-t3   .file-cell { background: rgba(234, 179,   8, 0.17); } /* < 40% — amber */
+.file-row.row-t4   .file-cell { background: rgba(249, 115,  22, 0.18); } /* < 65% — orange */
+.file-row.row-t5   .file-cell { background: rgba(239,  68,  68, 0.20); } /* 65%+  — red */
 .file-row.row-selected .file-cell { background: #dbeafe !important; }
 .file-row.row-hidden { opacity: 0.55; }
 
@@ -212,6 +218,22 @@
 .table-scan-label {
   font-size: 13px;
   color: var(--text-secondary);
+}
+
+/* Status line — slides up from below each time the message changes.
+   Using key={scanStatus} in React re-mounts the element, restarting the animation. */
+@keyframes scan-status-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.table-scan-status {
+  font-size: 11px;
+  color: var(--text-secondary);
+  opacity: 0.75;
+  animation: scan-status-in 0.25s ease-out forwards;
+  /* Clip the container height so the old text doesn't linger during slide */
+  overflow: hidden;
 }
 
 .spinner-paused {
