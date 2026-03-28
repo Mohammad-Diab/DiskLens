@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../store/useStore';
-import { DiskInfo, ScanResult } from '../types';
+import { ScanResult } from '../types';
 
 function parentOf(path: string): string | null {
   const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
@@ -50,34 +50,7 @@ export function useKeyboard() {
         e.preventDefault();
         const parent = parentOf(currentPath);
         if (!parent) return;
-
-        // Check if parent is already in the scanned tree
-        const inTree = entries.some(
-          (en) => en.parent.toLowerCase() === parent.toLowerCase()
-        ) || entries.some(
-          (en) => en.path.toLowerCase() === parent.toLowerCase()
-        );
-
-        if (inTree) {
-          store.navigate(parent);
-        } else {
-          store.setIsScanning(true);
-          try {
-            const [result, drives] = await Promise.all([
-              invoke<ScanResult>('scan_dir', { path: parent }),
-              invoke<DiskInfo[]>('get_drives'),
-            ]);
-            store.setEntries(result.entries);
-            store.setScanRoot(result.path);
-            const drive = (drives as DiskInfo[]).find((d) =>
-              result.path.toLowerCase().startsWith(d.driveLetter.toLowerCase())
-            );
-            store.setDiskInfo(drive ?? null);
-            store.navigate(result.path);
-          } finally {
-            store.setIsScanning(false);
-          }
-        }
+        store.navigate(parent);
         return;
       }
 
@@ -88,33 +61,8 @@ export function useKeyboard() {
         const [id] = selectedIds;
         const entry = entries.find((en) => en.id === id);
         if (!entry || entry.kind !== 'folder') return;
-
-        const inTree = entries.some(
-          (en) => en.parent.toLowerCase() === entry.path.toLowerCase()
-        );
-
-        if (inTree) {
-          store.navigate(entry.path);
-          store.clearSelection();
-        } else {
-          store.setIsScanning(true);
-          try {
-            const [result, drives] = await Promise.all([
-              invoke<ScanResult>('scan_dir', { path: entry.path }),
-              invoke<DiskInfo[]>('get_drives'),
-            ]);
-            store.setEntries(result.entries);
-            store.setScanRoot(result.path);
-            const drive = (drives as DiskInfo[]).find((d) =>
-              result.path.toLowerCase().startsWith(d.driveLetter.toLowerCase())
-            );
-            store.setDiskInfo(drive ?? null);
-            store.navigate(result.path);
-            store.clearSelection();
-          } finally {
-            store.setIsScanning(false);
-          }
-        }
+        store.navigate(entry.path);
+        store.clearSelection();
         return;
       }
 

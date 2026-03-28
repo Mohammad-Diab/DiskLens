@@ -224,21 +224,6 @@ export function Toolbar({ showFilters = true }: ToolbarProps) {
       {/* ── Normal mode: search + filters + new-scan ── */}
       {showFilters && (
         <div className="toolbar-row toolbar-row-2">
-          {/* Search — leftmost */}
-          <div className="search-box">
-            <Search size={13} className="search-icon" />
-            <input
-              className="search-input"
-              type="text"
-              value={localSearch}
-              onChange={(e) => setLocalSearch(e.target.value)}
-              placeholder="Search..."
-            />
-            {localSearch && (
-              <button className="search-clear" onClick={() => { setLocalSearch(''); setSearchQuery(''); }}>×</button>
-            )}
-          </div>
-
           {/* Type filter chips — hide chips with 0 items in current folder */}
           <div className="filter-chips">
             {KIND_FILTERS.filter((f) =>
@@ -263,10 +248,24 @@ export function Toolbar({ showFilters = true }: ToolbarProps) {
             Show hidden
           </label>
 
-          {/* New scan — far right */}
+          {/* Search — far right */}
+          <div className="search-box" style={{ marginLeft: 'auto' }}>
+            <Search size={13} className="search-icon" />
+            <input
+              className="search-input"
+              type="text"
+              value={localSearch}
+              onChange={(e) => setLocalSearch(e.target.value)}
+              placeholder="Search..."
+            />
+            {localSearch && (
+              <button className="search-clear" onClick={() => { setLocalSearch(''); setSearchQuery(''); }}>×</button>
+            )}
+          </div>
+
+          {/* New scan */}
           <button
             className="icon-btn"
-            style={{ marginLeft: 'auto' }}
             onClick={resetScan}
             title="Start a new scan"
           >
