@@ -172,13 +172,13 @@
 .chip {
   display: flex;
   align-items: center;
-  gap: 3px;
-  padding: 3px 8px;
+  gap: 2px;
+  padding: 1px 7px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 10px;
   background: var(--bg-surface);
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 11px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -195,7 +195,7 @@
 
 .chip-count {
   font-size: 10px;
-  opacity: 0.7;
+  opacity: 0.65;
 }
 
 /* ── Show hidden toggle ── */

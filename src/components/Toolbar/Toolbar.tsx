@@ -149,8 +149,12 @@ export function Toolbar({ showFilters = true }: ToolbarProps) {
     setShowDropdown(false);
   }
 
-  const kindCounts: Record<string, number> = { all: entries.length };
-  entries.forEach((e) => {
+  // Count only direct children of the current folder
+  const currentEntries = entries.filter(
+    (e) => e.parent.toLowerCase() === currentPath.toLowerCase()
+  );
+  const kindCounts: Record<string, number> = { all: currentEntries.length };
+  currentEntries.forEach((e) => {
     kindCounts[e.kind] = (kindCounts[e.kind] ?? 0) + 1;
   });
 
@@ -217,19 +221,10 @@ export function Toolbar({ showFilters = true }: ToolbarProps) {
         </div>
       )}
 
-      {/* ── Normal mode: new-scan + search + filters ── */}
+      {/* ── Normal mode: search + filters + new-scan ── */}
       {showFilters && (
         <div className="toolbar-row toolbar-row-2">
-          {/* New scan */}
-          <button
-            className="icon-btn"
-            onClick={resetScan}
-            title="New scan"
-          >
-            <FolderSearch size={14} />
-          </button>
-
-          {/* Search */}
+          {/* Search — leftmost */}
           <div className="search-box">
             <Search size={13} className="search-icon" />
             <input
@@ -244,9 +239,11 @@ export function Toolbar({ showFilters = true }: ToolbarProps) {
             )}
           </div>
 
-          {/* Type filter chips */}
+          {/* Type filter chips — hide chips with 0 items in current folder */}
           <div className="filter-chips">
-            {KIND_FILTERS.map((f) => (
+            {KIND_FILTERS.filter((f) =>
+              f.value === 'all' || (kindCounts[f.value] ?? 0) > 0
+            ).map((f) => (
               <button
                 key={f.value}
                 className={`chip${activeFilter === f.value ? ' chip-active' : ''}`}
@@ -260,11 +257,21 @@ export function Toolbar({ showFilters = true }: ToolbarProps) {
             ))}
           </div>
 
-          {/* Show hidden toggle */}
-          <label className="toggle-label">
+          {/* Show hidden files toggle */}
+          <label className="toggle-label" title="Show files and folders hidden by Windows">
             <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} />
-            Hidden
+            Show hidden
           </label>
+
+          {/* New scan — far right */}
+          <button
+            className="icon-btn"
+            style={{ marginLeft: 'auto' }}
+            onClick={resetScan}
+            title="Start a new scan"
+          >
+            <FolderSearch size={14} />
+          </button>
         </div>
       )}
 

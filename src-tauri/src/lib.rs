@@ -22,6 +22,7 @@ pub fn run() {
             file_ops::delete_to_trash,
             file_ops::delete_permanent,
             file_ops::rename_file,
+            system::open_path,
             system::open_in_explorer,
             system::copy_to_clipboard,
             system::get_file_info,

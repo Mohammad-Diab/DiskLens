@@ -2,8 +2,8 @@ import { useEffect } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import './App.css';
 import { Breadcrumb } from './components/Breadcrumb/Breadcrumb';
-import { DiskBar } from './components/DiskBar/DiskBar';
 import { FileTable } from './components/FileTable/FileTable';
+import { Footer } from './components/Footer/Footer';
 import { SidePanel } from './components/SidePanel/SidePanel';
 import { Toolbar } from './components/Toolbar/Toolbar';
 import { useKeyboard } from './hooks/useKeyboard';
@@ -58,12 +58,12 @@ function App() {
   return (
     <div className="app">
       <Toolbar />
-      <DiskBar />
       <Breadcrumb />
       <div className="main-content">
         <FileTable />
         {sidePanelOpen && <SidePanel />}
       </div>
+      <Footer />
     </div>
   );
 }
