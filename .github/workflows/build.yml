@@ -29,20 +29,20 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - name: Install frontend deps
+      - name: Install frontend dependencies
         run: npm ci
 
       - name: Build Tauri app
         run: npm run tauri build
 
-      - name: Upload MSI installer
+      - name: Upload MSI installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DiskLens-windows-installer
+          name: DiskLens-installer
           path: src-tauri/target/release/bundle/msi/*.msi
-          if-no-files-found: warn
+          if-no-files-found: error
 
-      - name: Upload to GitHub Release
+      - name: Attach installer to GitHub Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:

@@ -24,3 +24,6 @@ dist-ssr
 *.sw?
 
 .claude
+
+# Tauri build output
+src-tauri/target/

@@ -1,77 +1,62 @@
 # DiskLens
 
-A fast Windows disk analyzer desktop app. Scan any folder or drive and instantly see which files and folders are eating your disk space — sorted by size, filterable by type, with a virtual list that handles 100,000+ entries smoothly.
+A fast Windows disk space analyzer built with Tauri 2 + React + Rust.
 
-Built with **Tauri 2** (Rust backend) + **React 19** + **TypeScript**.
-
----
+[![Build](https://github.com/mhdaib/DiskLens/actions/workflows/build.yml/badge.svg)](https://github.com/mhdaib/DiskLens/actions/workflows/build.yml)
 
 ## Features
 
-- **Instant scan** — uses `FindFirstFile`/`FindNextFile` Windows API; auto-upgrades to direct MFT read on NTFS + admin for maximum speed
-- **Virtual scroll** — smooth scrolling through 100,000+ entries via TanStack Virtual
-- **Sort by size** — default sort shows largest items first; click any column header to re-sort
-- **Color coding** — rows tinted red/amber/green by % of parent folder size
-- **Multi-select** — checkbox, Ctrl+click, Shift+click, Ctrl+A
-- **Context menu** — right-click for Open in Explorer, Copy Path, Trash, Delete Permanently, Properties
-- **Side panel** — persistent properties view with inline rename
-- **Type filters** — filter by Folders, Programs, Documents, Images, Videos, System, Archives
-- **Search** — debounced 200ms client-side name filter
-- **Disk usage bar** — used / free / total with color alert above 90%
-- **Column visibility** — toggle columns via gear icon
+- **Instant scanning** — uses Windows `FindFirstFile`/`FindNextFile` API for fast traversal; falls back to NTFS MFT for admin-level speed
+- **Sorted file table** — click any column header to sort by name, size, type, or date; virtually scrolled for 50,000+ entries
+- **Breadcrumb navigation** — click into folders and navigate back without rescanning
+- **Multi-select** — Ctrl+click, Shift+click, or rubber-band drag to select multiple items
+- **Context menu** — right-click to open, reveal in Explorer, copy path/name, send to Trash, or delete permanently
+- **Type filter chips** — quickly filter to folders, images, videos, documents, archives, etc.
+- **Search** — debounced name search across the current folder
 - **Show hidden files** toggle
+- **Side panel** — click a file to see properties (size, dates, kind)
+- **Disk usage bar** — footer shows drive capacity, used, and free space at drive root
+- **Color-coded rows** — red (>30% of parent), amber (10–30%), green (<10%)
 - **Dark mode** — follows system preference automatically
-- **Keyboard shortcuts** — Delete, Shift+Delete, Backspace, Enter, Ctrl+A, Ctrl+C, Escape, P, F5, Ctrl+F
-
----
+- **Keyboard shortcuts** — Delete, Escape, Ctrl+A, arrow keys, Enter to open
 
 ## Download
 
-Get the latest `.msi` installer from the [Releases](../../releases) page.
-
----
+Download the latest `.msi` installer from [Releases](../../releases/latest).
 
 ## Build from Source
 
-**Prerequisites:**
+**Prerequisites**
+
 - [Node.js 20+](https://nodejs.org/)
 - [Rust stable](https://rustup.rs/)
-- Windows 10/11
 
 ```bash
-git clone https://github.com/your-username/DiskLens.git
+git clone https://github.com/mhdaib/DiskLens.git
 cd DiskLens
 npm install
 npm run tauri build
-# Installer: src-tauri/target/release/bundle/msi/
 ```
 
-**Dev mode:**
+The installer is placed in `src-tauri/target/release/bundle/msi/`.
+
+**Development server:**
+
 ```bash
 npm run tauri dev
 ```
 
----
-
 ## Architecture
 
-| Layer    | Technology |
-|----------|-----------|
-| Backend  | Rust (Tauri 2) |
+| Layer | Technology |
+|-------|-----------|
+| Window shell | Tauri 2 |
 | Frontend | React 19 + TypeScript |
-| Build    | Vite 5 |
-| Table    | TanStack Table v8 + Virtual v3 |
-| State    | Zustand v4 |
-| Icons    | Lucide React |
-
-**Scan strategy (auto-selected at runtime):**
-
-| Condition | Method |
-|-----------|--------|
-| NTFS + running as Administrator | Direct MFT read (`ntfs` crate) — fastest |
-| Everything else | `FindFirstFile`/`FindNextFile` Windows API |
-
----
+| State | Zustand |
+| Table | TanStack Table v8 + Virtual v3 |
+| Backend | Rust |
+| File scan | Windows `FindFirstFile` API / NTFS MFT |
+| File ops | `trash` crate (safe delete), `std::fs` (permanent) |
 
 ## License
 
