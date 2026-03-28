@@ -97,8 +97,6 @@ export function ContextMenu({
         )}
       </div>
 
-      <Sep />
-
       {/* ── Multi-select menu ── */}
       {isMulti && (
         <>

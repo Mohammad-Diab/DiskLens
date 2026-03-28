@@ -9,7 +9,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../../store/useStore';
-import { DiskInfo, FileEntry, ScanResult } from '../../types';
+import { FileEntry } from '../../types';
 import { allColumns } from './columns';
 import { ContextMenu } from '../ContextMenu/ContextMenu';
 import './FileTable.css';
@@ -42,12 +42,9 @@ export function FileTable() {
   const knownTotals    = useStore((s) => s.knownTotals);
 
   const navigate         = useStore((s) => s.navigate);
-  const setScanRoot      = useStore((s) => s.setScanRoot);
   const setEntries       = useStore((s) => s.setEntries);
   const setIsScanning    = useStore((s) => s.setIsScanning);
   const setIsPaused      = useStore((s) => s.setIsPaused);
-  const setDiskInfo      = useStore((s) => s.setDiskInfo);
-  const setKnownTotal    = useStore((s) => s.setKnownTotal);
   const setSelectedIds   = useStore((s) => s.setSelectedIds);
   const clearSelection   = useStore((s) => s.clearSelection);
   const resetScan        = useStore((s) => s.resetScan);
@@ -83,11 +80,11 @@ export function FileTable() {
       .then((children) => {
         if (cancelled) return;
         const enhanced = children.map((child) => {
+          if (child.kind !== 'folder') return child;
           const known = knownTotals[child.path.toLowerCase()];
-          if (child.kind === 'folder' && known !== undefined) {
-            return { ...child, sizeBytes: known, sizeOnDisk: known };
-          }
-          return child;
+          if (known !== undefined) return { ...child, sizeBytes: known, sizeOnDisk: known };
+          // Mark unscanned folders with -1 so the size column shows "—"
+          return { ...child, sizeBytes: -1, sizeOnDisk: -1 };
         });
         setShallowEntries(enhanced);
       })
@@ -136,32 +133,9 @@ export function FileTable() {
 
   // ── Navigation ─────────────────────────────────────────────────────────────
 
-  async function navigateTo(entry: FileEntry) {
+  function navigateTo(entry: FileEntry) {
     if (entry.kind !== 'folder' || isScanning) return;
-    const inTree = entries.some(
-      (e) => e.parent.toLowerCase() === entry.path.toLowerCase()
-    );
-    if (inTree) {
-      navigate(entry.path);
-    } else {
-      setIsScanning(true);
-      try {
-        const [result, drives] = await Promise.all([
-          invoke<ScanResult>('scan_dir', { path: entry.path }),
-          invoke<DiskInfo[]>('get_drives'),
-        ]);
-        setEntries(result.entries);
-        setScanRoot(result.path);
-        setKnownTotal(result.path, result.total);
-        const drive = (drives as DiskInfo[]).find((d) =>
-          result.path.toLowerCase().startsWith(d.driveLetter.toLowerCase())
-        );
-        setDiskInfo(drive ?? null);
-        navigate(result.path);
-      } finally {
-        setIsScanning(false);
-      }
-    }
+    navigate(entry.path);
   }
 
   // ── Row click / selection ──────────────────────────────────────────────────

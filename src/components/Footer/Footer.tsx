@@ -2,6 +2,7 @@ import { useStore } from '../../store/useStore';
 import './Footer.css';
 
 function formatBytes(n: number): string {
+  if (n < 0) return '—';
   if (n >= 1e12) return (n / 1e12).toFixed(1) + ' TB';
   if (n >= 1e9)  return (n / 1e9).toFixed(1) + ' GB';
   if (n >= 1e6)  return (n / 1e6).toFixed(1) + ' MB';
@@ -22,11 +23,11 @@ export function Footer() {
     (e) => e.parent.toLowerCase() === currentPath.toLowerCase()
   );
   const itemCount     = folderEntries.length;
-  const folderSize    = folderEntries.reduce((sum, e) => sum + e.sizeBytes, 0);
+  const folderSize    = folderEntries.reduce((sum, e) => sum + Math.max(0, e.sizeBytes), 0);
   const selectedCount = selectedIds.size;
   const selectedSize  = folderEntries
     .filter((e) => selectedIds.has(e.id))
-    .reduce((sum, e) => sum + e.sizeBytes, 0);
+    .reduce((sum, e) => sum + Math.max(0, e.sizeBytes), 0);
 
   const showDisk = diskInfo && isDriveRoot(currentPath);
   const usedPct  = showDisk
