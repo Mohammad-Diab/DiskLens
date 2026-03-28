@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "disk-lens",
+  "productName": "DiskLens",
   "version": "0.1.0",
   "identifier": "com.mhdaib.disklens",
   "build": {
@@ -12,9 +12,11 @@
   "app": {
     "windows": [
       {
-        "title": "disk-lens",
-        "width": 800,
-        "height": 600
+        "title": "DiskLens",
+        "width": 1000,
+        "height": 680,
+        "minWidth": 640,
+        "minHeight": 400
       }
     ],
     "security": {
