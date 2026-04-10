@@ -135,6 +135,8 @@ pub fn build_entry_pub(path: &std::path::Path) -> Option<FileEntry> {
         child_files: 0,
         child_folders: 0,
         total_items: 0,
+        total_files: 0,
+        total_folders: 0,
     })
 }
 
@@ -196,7 +198,7 @@ pub async fn scan_dir(
         scan_parallel(&path, &emit, &emit_status, &stop, &paused)
     })
     .await
-    .unwrap_or_else(|_| ScanResult { path: String::new(), entries: vec![], total: 0, folder_sizes: Default::default() }))
+    .unwrap_or_else(|_| ScanResult { path: String::new(), entries: vec![], total: 0, folder_sizes: Default::default(), folder_file_counts: Default::default(), folder_folder_counts: Default::default() }))
 }
 
 #[tauri::command]
@@ -316,7 +318,7 @@ struct RawEntry {
 
 fn build_result_from_raw(root: String, raw: Vec<RawEntry>) -> ScanResult {
     if raw.is_empty() {
-        return ScanResult { path: root, entries: vec![], total: 0, folder_sizes: Default::default() };
+        return ScanResult { path: root, entries: vec![], total: 0, folder_sizes: Default::default(), folder_file_counts: Default::default(), folder_folder_counts: Default::default() };
     }
 
     // Cumulative folder sizes (files propagate up to parents)
@@ -358,6 +360,33 @@ fn build_result_from_raw(root: String, raw: Vec<RawEntry>) -> ScanResult {
         else        { *child_files_map.entry(e.parent.clone()).or_insert(0)   += 1; }
     }
 
+    // Recursive (total) file/folder counts — propagate bottom-up like folder sizes
+    let mut total_files_map:   HashMap<String, u64> = HashMap::new();
+    let mut total_folders_map: HashMap<String, u64> = HashMap::new();
+    // Seed direct children
+    for e in &raw {
+        if e.is_dir {
+            total_folders_map.entry(e.path.clone()).or_insert(0);
+            *total_folders_map.entry(e.parent.clone()).or_insert(0) += 1;
+        } else {
+            *total_files_map.entry(e.parent.clone()).or_insert(0) += 1;
+        }
+    }
+    // Propagate deepest-first (same ordering used for folder sizes)
+    for dir_path in &dir_paths {
+        let tf = *total_files_map.get(dir_path).unwrap_or(&0);
+        let tfo = *total_folders_map.get(dir_path).unwrap_or(&0);
+        if tf == 0 && tfo == 0 { continue; }
+        let parent_path = std::path::Path::new(dir_path)
+            .parent()
+            .map(|p| normalize_path(&p.to_string_lossy()))
+            .unwrap_or_default();
+        if !parent_path.is_empty() {
+            *total_files_map.entry(parent_path.clone()).or_insert(0) += tf;
+            *total_folders_map.entry(parent_path).or_insert(0) += tfo;
+        }
+    }
+
     let entries: Vec<FileEntry> = raw
         .into_iter()
         .map(|e| {
@@ -371,6 +400,8 @@ fn build_result_from_raw(root: String, raw: Vec<RawEntry>) -> ScanResult {
             let pct_disk   = if total_size > 0 { (size as f64 / total_size as f64) * 100.0 } else { 0.0 };
             let cf  = *child_files_map.get(&e.path).unwrap_or(&0);
             let cfo = *child_folders_map.get(&e.path).unwrap_or(&0);
+            let tf  = *total_files_map.get(&e.path).unwrap_or(&0);
+            let tfo = *total_folders_map.get(&e.path).unwrap_or(&0);
 
             FileEntry {
                 id:   hash_path(&e.path),
@@ -390,11 +421,13 @@ fn build_result_from_raw(root: String, raw: Vec<RawEntry>) -> ScanResult {
                 child_files:   cf,
                 child_folders: cfo,
                 total_items:   cf + cfo,
+                total_files:   tf,
+                total_folders: tfo,
             }
         })
         .collect();
 
-    ScanResult { path: root, entries, total: total_size, folder_sizes: folder_size }
+    ScanResult { path: root, entries, total: total_size, folder_sizes: folder_size, folder_file_counts: total_files_map, folder_folder_counts: total_folders_map }
 }
 
 // ─── USN Journal scan (Windows, NTFS fixed drive root, admin) ────────────────
@@ -777,7 +810,7 @@ fn scan_parallel(
 ) -> ScanResult {
     let root_norm = normalize_path(root);
     if !std::path::Path::new(&root_norm).exists() {
-        return ScanResult { path: root_norm, entries: vec![], total: 0, folder_sizes: Default::default() };
+        return ScanResult { path: root_norm, entries: vec![], total: 0, folder_sizes: Default::default(), folder_file_counts: Default::default(), folder_folder_counts: Default::default() };
     }
 
     let raw   = Mutex::new(Vec::<RawEntry>::with_capacity(50_000));

@@ -57,6 +57,8 @@ pub struct FileEntry {
     pub child_files: u64,
     pub child_folders: u64,
     pub total_items: u64,
+    pub total_files: u64,
+    pub total_folders: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -76,7 +78,10 @@ pub struct ScanResult {
     pub path: String,
     pub entries: Vec<FileEntry>,
     pub total: u64,
-    /// Size of every scanned directory (path → bytes). Used by the frontend to
-    /// populate knownTotals so lazy-navigated sub-folders show correct sizes.
+    /// Size of every scanned directory (path → bytes).
     pub folder_sizes: std::collections::HashMap<String, u64>,
+    /// Total recursive file count for every scanned directory (path → count).
+    pub folder_file_counts: std::collections::HashMap<String, u64>,
+    /// Total recursive folder count for every scanned directory (path → count).
+    pub folder_folder_counts: std::collections::HashMap<String, u64>,
 }

@@ -19,26 +19,27 @@ export function useKeyboard() {
     async function handler(e: KeyboardEvent) {
       const target = e.target as HTMLElement;
       if (
-        target.tagName === 'INPUT' ||
+        (target.tagName === 'INPUT' && (target as HTMLInputElement).type !== 'checkbox') ||
         target.tagName === 'TEXTAREA' ||
         target.isContentEditable
       ) {
         return;
       }
 
-      const { currentPath, entries, selectedIds } = store;
+      const { currentPath, entries, viewEntries, selectedIds } = store;
 
       // Delete → Send to Trash
       if (e.key === 'Delete' && !e.shiftKey) {
         e.preventDefault();
-        const paths = entries
-          .filter((en) => selectedIds.has(en.id))
-          .map((en) => en.path);
-        if (paths.length === 0) return;
+        // Use viewEntries (includes shallow/unscanned folder items) so Delete
+        // works regardless of whether the folder has been fully scanned.
+        const toDelete = viewEntries.filter((en) => selectedIds.has(en.id));
+        if (toDelete.length === 0) return;
         try {
-          await invoke('delete_to_trash', { paths });
-          store.setEntries(entries.filter((en) => !selectedIds.has(en.id)));
-          store.clearSelection();
+          await invoke('delete_to_trash', { paths: toDelete.map((en) => en.path) });
+          // removeEntries propagates size reductions and updates knownTotals,
+          // which also re-triggers the shallow-fetch effect for unscanned folders.
+          store.removeEntries(toDelete);
         } catch (err) {
           console.error(err);
         }

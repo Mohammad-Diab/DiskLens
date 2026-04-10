@@ -40,16 +40,18 @@ export function FileTable() {
   const searchQuery    = useStore((s) => s.searchQuery);
   const showHidden     = useStore((s) => s.showHidden);
   const currentPath    = useStore((s) => s.currentPath);
-  const knownTotals    = useStore((s) => s.knownTotals);
+  const knownTotals       = useStore((s) => s.knownTotals);
+  const knownFileCounts   = useStore((s) => s.knownFileCounts);
+  const knownFolderCounts = useStore((s) => s.knownFolderCounts);
 
   const navigate         = useStore((s) => s.navigate);
-  const setEntries       = useStore((s) => s.setEntries);
   const setViewEntries   = useStore((s) => s.setViewEntries);
   const setIsScanning    = useStore((s) => s.setIsScanning);
   const setIsPaused      = useStore((s) => s.setIsPaused);
   const setSelectedIds   = useStore((s) => s.setSelectedIds);
   const clearSelection   = useStore((s) => s.clearSelection);
   const resetScan        = useStore((s) => s.resetScan);
+  const removeEntries    = useStore((s) => s.removeEntries);
   const setSidePanelItem = useStore((s) => s.setSidePanelItem);
   const setSidePanelOpen = useStore((s) => s.setSidePanelOpen);
 
@@ -81,12 +83,20 @@ export function FileTable() {
     invoke<FileEntry[]>('get_dir_children', { path: currentPath })
       .then((children) => {
         if (cancelled) return;
-        // Resolve known folder sizes
+        // Resolve known folder sizes and recursive counts
         const withSizes = children.map((child) => {
           if (child.kind !== 'folder') return child;
-          const known = knownTotals[child.path.toLowerCase()];
-          if (known !== undefined) return { ...child, sizeBytes: known, sizeOnDisk: known };
-          return { ...child, sizeBytes: -1, sizeOnDisk: -1 };
+          const lc = child.path.toLowerCase();
+          const known = knownTotals[lc];
+          const tf  = knownFileCounts[lc];
+          const tfo = knownFolderCounts[lc];
+          return {
+            ...child,
+            sizeBytes:    known !== undefined ? known : -1,
+            sizeOnDisk:   known !== undefined ? known : -1,
+            totalFiles:   tf  ?? 0,
+            totalFolders: tfo ?? 0,
+          };
         });
         // Compute pctParent so row coloring works the same as in scanned folders
         const totalVisible = withSizes.reduce((s, e) => s + Math.max(0, e.sizeBytes), 0);
@@ -98,7 +108,10 @@ export function FileTable() {
       })
       .catch(() => { if (!cancelled) setShallowEntries([]); });
     return () => { cancelled = true; };
-  }, [currentPath, treeEntries.length, isScanning]);
+  // knownTotals is intentionally included: after a delete, removeEntries shrinks
+  // ancestor sizes in knownTotals, which re-triggers this effect so remaining
+  // items display their updated (correct) sizes.
+  }, [currentPath, treeEntries.length, isScanning, knownTotals]);
 
   const baseEntries = treeEntries.length > 0 ? treeEntries : shallowEntries;
 
@@ -214,12 +227,21 @@ export function FileTable() {
 
   // ── Delete helpers ─────────────────────────────────────────────────────────
 
+  function applyDelete(deleted: FileEntry[]) {
+    // Update store: removes entries, propagates size reductions up ancestor chain,
+    // shrinks knownTotals for every ancestor folder, recalculates pctParent for siblings.
+    removeEntries(deleted);
+    // Immediately remove from the local shallow list for instant feedback.
+    // The knownTotals change will also re-trigger the shallow-fetch effect,
+    // refreshing sizes for remaining items.
+    const ids = new Set(deleted.map((e) => e.id));
+    setShallowEntries((prev) => prev.filter((e) => !ids.has(e.id)));
+  }
+
   async function handleDeleteTrash(entriesToDelete: FileEntry[]) {
     try {
       await invoke('delete_to_trash', { paths: entriesToDelete.map((e) => e.path) });
-      const ids = new Set(entriesToDelete.map((e) => e.id));
-      setEntries(entries.filter((e) => !ids.has(e.id)));
-      clearSelection();
+      applyDelete(entriesToDelete);
     } catch (err) { console.error(err); }
   }
 
@@ -227,9 +249,7 @@ export function FileTable() {
     if (!deleteTargets) return;
     try {
       await invoke('delete_permanent', { paths: deleteTargets.map((e) => e.path) });
-      const ids = new Set(deleteTargets.map((e) => e.id));
-      setEntries(entries.filter((e) => !ids.has(e.id)));
-      clearSelection();
+      applyDelete(deleteTargets);
     } catch (err) { console.error(err); }
     finally { setDeleteTargets(null); }
   }

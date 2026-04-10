@@ -61,7 +61,7 @@ export const allColumns: ColumnDef<FileEntry>[] = [
           </div>
           {isFolder && entry.totalItems > 0 && (
             <span className="sub-label">
-              {entry.childFiles} files, {entry.childFolders} folders
+              {entry.totalFiles.toLocaleString()} files, {entry.totalFolders.toLocaleString()} folders
             </span>
           )}
         </div>
@@ -99,6 +99,17 @@ export const allColumns: ColumnDef<FileEntry>[] = [
     cell: ({ getValue }) => {
       const k = getValue() as string;
       return k.charAt(0).toUpperCase() + k.slice(1);
+    },
+  },
+  {
+    id: 'items',
+    header: 'Files / Folders',
+    accessorFn: (row) => row.totalFiles + row.totalFolders,
+    cell: ({ row }) => {
+      const entry = row.original;
+      if (entry.kind !== 'folder') return '—';
+      if (entry.totalFiles === 0 && entry.totalFolders === 0) return '—';
+      return `${entry.totalFiles.toLocaleString()} / ${entry.totalFolders.toLocaleString()}`;
     },
   },
   {

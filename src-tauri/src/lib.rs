@@ -29,6 +29,7 @@ pub fn run() {
             system::pick_folder,
             system::get_path_suggestions,
             system::is_admin,
+            system::open_terminal,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -51,7 +51,7 @@ export function ContextMenu({
 
   // Clamp so the menu stays within the viewport
   const menuWidth  = 210;
-  const menuHeight = isMulti ? 110 : isFolder ? 220 : 250;
+  const menuHeight = isMulti ? 110 : isFolder ? 250 : 250;
   const left = x + menuWidth  > window.innerWidth  ? x - menuWidth  : x;
   const top  = y + menuHeight > window.innerHeight ? y - menuHeight : y;
 
@@ -123,6 +123,12 @@ export function ContextMenu({
             label="Show in Explorer"
             onClick={action(() =>
               invoke('open_in_explorer', { path: entry.path }).catch(console.error)
+            )}
+          />
+          <Item
+            label="Open Terminal Here"
+            onClick={action(() =>
+              invoke('open_terminal', { path: entry.path }).catch(console.error)
             )}
           />
 

@@ -34,6 +34,7 @@ export function Toolbar({ showFilters = true }: ToolbarProps) {
     setDiskInfo,
     setKnownTotal,
     mergeKnownTotals,
+    mergeKnownCounts,
     setActiveFilter,
     setSearchQuery,
     setShowHidden,
@@ -115,6 +116,7 @@ export function Toolbar({ showFilters = true }: ToolbarProps) {
       setScanRoot(result.path);
       setKnownTotal(result.path, result.total);
       mergeKnownTotals(result.folderSizes);
+      mergeKnownCounts(result.folderFileCounts, result.folderFolderCounts);
       const drive = (driveList as DiskInfo[]).find((d) =>
         result.path.toLowerCase().startsWith(d.driveLetter.toLowerCase())
       );

@@ -26,6 +26,8 @@ export interface FileEntry {
   childFiles: number;
   childFolders: number;
   totalItems: number;
+  totalFiles: number;
+  totalFolders: number;
 }
 
 export interface DiskInfo {
@@ -43,4 +45,6 @@ export interface ScanResult {
   total: number;
   /** Every scanned directory and its accumulated byte size. */
   folderSizes: Record<string, number>;
+  folderFileCounts: Record<string, number>;
+  folderFolderCounts: Record<string, number>;
 }

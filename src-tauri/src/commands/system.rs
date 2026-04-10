@@ -54,6 +54,51 @@ pub async fn is_admin() -> bool {
     }
 }
 
+/// Open a terminal window in the given directory.
+/// Tries Windows Terminal (wt), then PowerShell, then cmd as fallbacks.
+#[tauri::command]
+pub async fn open_terminal(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NEW_CONSOLE: u32 = 0x00000010;
+
+            // 1. Windows Terminal
+            if std::process::Command::new("wt")
+                .args(["-d", &path])
+                .creation_flags(0x08000000) // CREATE_NO_WINDOW for the launcher itself
+                .spawn()
+                .is_ok()
+            {
+                return Ok(());
+            }
+
+            // 2. PowerShell
+            if std::process::Command::new("powershell")
+                .args(["-NoExit", "-Command", &format!("Set-Location '{}'", path)])
+                .creation_flags(CREATE_NEW_CONSOLE)
+                .spawn()
+                .is_ok()
+            {
+                return Ok(());
+            }
+
+            // 3. cmd
+            std::process::Command::new("cmd")
+                .args(["/K", &format!("cd /d \"{}\"", path)])
+                .creation_flags(CREATE_NEW_CONSOLE)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        }
+        #[cfg(not(windows))]
+        Err("open_terminal is not supported on this platform".to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Open a file or folder with the OS default application.
 #[tauri::command]
 pub async fn open_path(path: String) -> Result<(), String> {
