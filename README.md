@@ -2,8 +2,6 @@
 
 A fast Windows disk space analyzer built with Tauri 2 + React + Rust.
 
-[![Build](https://github.com/mhdaib/DiskLens/actions/workflows/build.yml/badge.svg)](https://github.com/mhdaib/DiskLens/actions/workflows/build.yml)
-
 ## Features
 
 - **Instant scanning** — uses Windows `FindFirstFile`/`FindNextFile` API for fast traversal; falls back to NTFS MFT for admin-level speed
@@ -22,7 +20,7 @@ A fast Windows disk space analyzer built with Tauri 2 + React + Rust.
 
 ## Download
 
-Download the latest `.msi` installer from [Releases](../../releases/latest).
+Download the latest `.msi` installer from [Releases](../../releases).
 
 ## Build from Source
 
@@ -32,7 +30,7 @@ Download the latest `.msi` installer from [Releases](../../releases/latest).
 - [Rust stable](https://rustup.rs/)
 
 ```bash
-git clone https://github.com/mhdaib/DiskLens.git
+git clone https://github.com/Mohammad-Diab/DiskLens.git
 cd DiskLens
 npm install
 npm run tauri build
