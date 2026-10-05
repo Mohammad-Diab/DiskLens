@@ -40,3 +40,13 @@ winapi = { version = "0.3", features = [
   "errhandlingapi",
   "shellapi",
 ] }
+
+# Smaller debug artifacts and faster linking: keep line info for our crate only.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.release]
+strip = true
